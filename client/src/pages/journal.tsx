@@ -64,44 +64,47 @@ export default function Journal() {
                       No trades found for this day.
                     </div>
                   ) : (
-                    filteredTrades.map(trade => (
-                      <div 
-                        key={trade.id}
-                        onClick={() => setSelectedTrade(trade)}
-                        className="p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer transition-colors group relative overflow-hidden"
-                      >
-                         {/* Mini MAE bar on side */}
-                         <div 
-                           className={cn(
-                             "absolute left-0 top-0 bottom-0 w-1",
-                             (trade.mae / trade.risk) > 0.8 ? "bg-destructive" :
-                             (trade.mae / trade.risk) > 0.5 ? "bg-yellow-500" : "bg-emerald-500"
-                           )}
-                         />
+                    filteredTrades.map(trade => {
+                      const visualRisk = trade.risk || 20;
+                      return (
+                        <div 
+                          key={trade.id}
+                          onClick={() => setSelectedTrade(trade)}
+                          className="p-3 rounded-lg border border-border hover:bg-accent/50 cursor-pointer transition-colors group relative overflow-hidden"
+                        >
+                           {/* Mini MAE bar on side */}
+                           <div 
+                             className={cn(
+                               "absolute left-0 top-0 bottom-0 w-1",
+                               (trade.mae / visualRisk) > 0.8 ? "bg-destructive" :
+                               (trade.mae / visualRisk) > 0.5 ? "bg-yellow-500" : "bg-emerald-500"
+                             )}
+                           />
 
-                        <div className="flex justify-between items-start mb-2 pl-2">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={trade.side === "BUY" ? "default" : "destructive"} className="px-1.5 py-0 text-[10px]">
-                              {trade.side}
-                            </Badge>
-                            <span className="font-mono font-bold text-sm">{trade.symbol}</span>
+                          <div className="flex justify-between items-start mb-2 pl-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant={trade.side === "BUY" ? "default" : "destructive"} className="px-1.5 py-0 text-[10px]">
+                                {trade.side}
+                              </Badge>
+                              <span className="font-mono font-bold text-sm">{trade.symbol}</span>
+                            </div>
+                            <span className={cn(
+                              "font-mono font-medium text-sm",
+                              trade.netPnl > 0 ? "text-profit" : "text-loss"
+                            )}>
+                              {trade.netPnl > 0 ? "+" : ""}{trade.netPnl.toFixed(0)}
+                            </span>
                           </div>
-                          <span className={cn(
-                            "font-mono font-medium text-sm",
-                            trade.netPnl > 0 ? "text-profit" : "text-loss"
-                          )}>
-                            {trade.netPnl > 0 ? "+" : ""}{trade.netPnl.toFixed(0)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-end pl-2">
-                          <span className="text-xs text-muted-foreground">{trade.setup}</span>
-                          <div className="flex gap-2 text-xs font-mono text-muted-foreground">
-                            <span>MAE: {trade.mae}</span>
-                            <span>{format(new Date(trade.closeTime), "HH:mm")}</span>
+                          <div className="flex justify-between items-end pl-2">
+                            <span className="text-xs text-muted-foreground">{trade.setup}</span>
+                            <div className="flex gap-2 text-xs font-mono text-muted-foreground">
+                              <span>MAE: -${trade.mae_cash.toFixed(2)}</span>
+                              <span>{format(new Date(trade.closeTime), "HH:mm")}</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

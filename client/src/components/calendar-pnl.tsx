@@ -239,13 +239,15 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                   <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Date</th>
                   <th className="h-10 px-4 text-left align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Symbol</th>
                   <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Side</th>
-                  <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Drawdown (MAE)</th>
+                  <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Drawdown (Cash)</th>
                   <th className="h-10 px-4 text-right align-middle font-medium text-muted-foreground uppercase tracking-wider text-xs">Net P&L</th>
                 </tr>
               </thead>
               <tbody>
                 {currentMonthTrades.length > 0 ? currentMonthTrades.sort((a,b) => new Date(b.closeTime).getTime() - new Date(a.closeTime).getTime()).map((trade) => {
-                   const maeRatio = Math.min(trade.mae / trade.risk, 1.2);
+                   // Logic for ratio: If no risk, use 20 as base for visual
+                   const visualRiskBaseline = trade.risk || 20;
+                   const maeRatio = Math.min(trade.mae / visualRiskBaseline, 1.2);
                    const maePercent = Math.round(maeRatio * 100);
                    
                    return (
@@ -262,11 +264,12 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                          </Badge>
                       </td>
                       <td className="p-4 align-middle">
-                        <div className="w-full max-w-[120px] mx-auto space-y-1">
-                          <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden relative">
+                        <div className="w-full max-w-[140px] mx-auto space-y-1">
+                          <div className="h-2 w-full bg-muted rounded-full overflow-hidden relative border border-border/50">
                             <div 
                               className={cn(
                                 "h-full rounded-full",
+                                !trade.risk ? "bg-purple-500" : // Distinct color for No-SL trades
                                 maeRatio > 0.8 ? "bg-destructive" :
                                 maeRatio > 0.5 ? "bg-yellow-500" :
                                 "bg-emerald-500"
@@ -274,8 +277,9 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                               style={{ width: `${Math.min(maePercent, 100)}%` }}
                             />
                           </div>
-                          <div className="text-[10px] text-muted-foreground text-center">
-                            {trade.mae}pts ({maePercent}%)
+                          <div className="flex justify-between items-center text-[10px] font-mono">
+                            <span className="text-muted-foreground">{trade.mae}pts</span>
+                            <span className="font-bold text-destructive">-${trade.mae_cash.toFixed(2)}</span>
                           </div>
                         </div>
                       </td>

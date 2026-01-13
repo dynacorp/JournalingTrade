@@ -6,9 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Trade } from "@/lib/mock-data";
 import { format } from "date-fns";
-import { Sparkles, AlertTriangle, CheckCircle2, TrendingDown, Target, ShieldAlert } from "lucide-react";
+import { Sparkles, AlertTriangle, CheckCircle2, ShieldAlert, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
 
 interface TradeDetailProps {
   trade: Trade | null;
@@ -22,10 +21,10 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
   const isWin = trade.netPnl > 0;
   
   // Calculate percentages for the drawdown visualization
-  // Total range = Risk + MFE (visualize the full excursion of the trade)
-  const maeRatio = Math.min(trade.mae / trade.risk, 1.2); // Cap at 120% for visual
-  const mfeRatio = trade.mfe / trade.risk;
+  // If NO SL, we use a synthetic "risk" baseline of 20 points just for visualization scaling
+  const visualRiskBaseline = trade.risk || 20; 
   
+  const maeRatio = Math.min(trade.mae / visualRiskBaseline, 1.5); // Cap at 150%
   const maePercent = Math.round(maeRatio * 100);
 
   return (
@@ -63,9 +62,9 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
                 <div className="font-mono font-medium">{trade.closePrice.toFixed(4)}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">R-Mult</div>
-                <div className={cn("font-mono font-medium", isWin ? "text-profit" : "text-loss")}>
-                  {(trade.pnl / 100).toFixed(1)}R
+                <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Risk</div>
+                <div className={cn("font-mono font-medium text-xs", !trade.risk && "text-destructive")}>
+                  {trade.risk ? `-${trade.risk}pts` : "NO SL"}
                 </div>
               </div>
             </div>
@@ -83,15 +82,20 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium">
                   <span className="text-muted-foreground">Entry</span>
-                  <span className="text-destructive">Stop Loss Risk ({trade.risk} pts)</span>
+                  {trade.risk ? (
+                    <span className="text-destructive">Stop Loss Risk ({trade.risk} pts)</span>
+                  ) : (
+                    <span className="text-destructive flex items-center gap-1"><Ban className="w-3 h-3" /> No Hard Stop</span>
+                  )}
                 </div>
                 
                 {/* Custom Risk Meter */}
-                <div className="relative h-4 bg-muted rounded-full overflow-hidden w-full">
+                <div className="relative h-6 bg-muted rounded-md overflow-hidden w-full border border-border/50">
                   {/* Heat Bar (MAE) */}
                   <div 
                     className={cn(
-                      "absolute top-0 left-0 h-full transition-all duration-500 rounded-full",
+                      "absolute top-0 left-0 h-full transition-all duration-500",
+                      !trade.risk && trade.mae > 30 ? "bg-destructive animate-pulse" : // No SL and huge drawdown
                       maeRatio > 1 ? "bg-destructive" : // Hit SL
                       maeRatio > 0.8 ? "bg-orange-500" : // High heat
                       maeRatio > 0.5 ? "bg-yellow-500" : // Moderate heat
@@ -100,24 +104,33 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
                     style={{ width: `${Math.min(maePercent, 100)}%` }}
                   />
                   
-                  {/* Stop Loss Marker Line */}
-                  <div className="absolute top-0 right-0 w-0.5 h-full bg-destructive z-10" />
+                  {/* Text Overlay on Bar */}
+                  <div className="absolute inset-0 flex items-center px-2 z-10">
+                     <span className="text-[10px] font-mono font-bold text-white drop-shadow-md">
+                       -${trade.mae_cash.toFixed(2)} ({trade.mae}pts)
+                     </span>
+                  </div>
+                  
+                  {/* Stop Loss Marker Line (only if SL exists) */}
+                  {trade.risk && (
+                    <div className="absolute top-0 right-0 w-0.5 h-full bg-destructive z-10 opacity-50" />
+                  )}
                 </div>
 
                 <div className="flex justify-between items-start text-xs font-mono pt-1">
                   <div>
-                    <span className="text-muted-foreground">Max Adverse: </span>
+                    <span className="text-muted-foreground">Max Heat: </span>
                     <span className={cn(
                       "font-bold",
                       maeRatio > 0.8 ? "text-destructive" : "text-foreground"
                     )}>
-                      {trade.mae} pts ({maePercent}%)
+                      {trade.mae} pts
                     </span>
                   </div>
                   <div>
-                    <span className="text-muted-foreground">Max Favorable: </span>
+                    <span className="text-muted-foreground">Peak Profit: </span>
                     <span className="text-profit font-bold">
-                      {trade.mfe} pts
+                      +{trade.mfe} pts
                     </span>
                   </div>
                 </div>
@@ -128,16 +141,17 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
                 <div className="bg-accent/30 rounded-lg p-3 border border-border">
                   <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Drawdown Efficiency</div>
                   <div className="text-sm font-medium">
-                    {maeRatio < 0.2 ? "sniper entry (no heat)" :
-                     maeRatio < 0.5 ? "Clean entry (normal noise)" :
-                     maeRatio < 0.9 ? "Heavy drawdown (held thru)" :
+                    {!trade.risk ? "Unprotected Trade" :
+                     maeRatio < 0.2 ? "Sniper entry" :
+                     maeRatio < 0.5 ? "Clean entry" :
+                     maeRatio < 0.9 ? "Heavy drawdown" :
                      "Stopped out / Failed"}
                   </div>
                 </div>
                 <div className="bg-accent/30 rounded-lg p-3 border border-border">
-                   <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Excursion Ratio</div>
-                   <div className="text-sm font-medium font-mono">
-                     1:{ (trade.mfe / (trade.mae || 1)).toFixed(1) }
+                   <div className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Max Cash Risk</div>
+                   <div className="text-sm font-medium font-mono text-destructive">
+                     -${trade.mae_cash.toFixed(2)}
                    </div>
                 </div>
               </div>

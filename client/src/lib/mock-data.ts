@@ -18,11 +18,13 @@ export type Trade = {
   notes: string;
   // Risk & Drawdown fields
   mae: number; // Maximum Adverse Excursion (points/pips)
+  mae_cash: number; // Maximum Adverse Excursion (cash value)
   mfe: number; // Maximum Favorable Excursion (points/pips)
-  risk: number; // Planned Stop Loss distance (points/pips)
+  risk: number | null; // Planned Stop Loss distance (points/pips) - Null if no SL
+  risk_cash: number | null; // Planned Stop Loss value (cash) - Null if no SL
   entry_price: number; 
-  sl_price: number;
-  tp_price: number;
+  sl_price: number | null;
+  tp_price: number | null;
   
   aiSummary?: {
     summary: string;
@@ -52,30 +54,45 @@ const generateMockTrades = (): Trade[] => {
       for (let i = 0; i < numTrades; i++) {
         const isWin = Math.random() > 0.45; // 55% win rate
         const side = Math.random() > 0.5 ? "BUY" : "SELL";
+        const hasSL = Math.random() > 0.2; // 20% trades have NO SL
         
         // Mock points calculation (simplified)
-        const riskPoints = Math.floor(Math.random() * 20) + 10; // 10-30 points risk
+        const riskPointsBase = Math.floor(Math.random() * 20) + 10; // 10-30 points standard risk
+        const riskPoints = hasSL ? riskPointsBase : null;
+        
+        // If No SL, we still need a "virtual risk" for reward calculation logic, or just random
+        const virtualRisk = riskPointsBase;
+        
         const rewardPoints = isWin 
-          ? riskPoints * (Math.random() * 2 + 1) // 1R to 3R
-          : -Math.min(riskPoints * (Math.random() * 0.5 + 0.8), riskPoints); // 0.8R to 1R loss
+          ? virtualRisk * (Math.random() * 2 + 1) // 1R to 3R
+          : -Math.min(virtualRisk * (Math.random() * 0.5 + 0.8), virtualRisk); // 0.8R to 1R loss
         
         const openPrice = side === "BUY" ? 1.0850 : 1.0900; // Simplified
-        const riskAmount = 100; // $100 risk per trade
-        const pnl = (rewardPoints / riskPoints) * riskAmount;
+        const riskAmount = 100; // $100 risk per trade (standard)
+        
+        // Value per point calculation
+        const valuePerPoint = riskAmount / virtualRisk;
+        
+        const pnl = (rewardPoints * valuePerPoint);
 
         // MAE generation
-        // If it's a win, MAE is usually small (0 to 80% of risk)
-        // If it's a loss, MAE usually hits 100% of risk (hit SL) or close to it
-        const maePoints = isWin 
-          ? Math.random() * (riskPoints * 0.8) 
-          : riskPoints * (Math.random() * 0.2 + 0.9); // 90-110% of risk (slippage)
+        let maePoints = 0;
+        if (isWin) {
+           maePoints = Math.random() * (virtualRisk * 0.8);
+        } else {
+           // If loss and Has SL -> hit SL (approx)
+           if (hasSL) {
+             maePoints = virtualRisk * (Math.random() * 0.2 + 0.9);
+           } else {
+             // If loss and NO SL -> could be huge drawdown
+             maePoints = virtualRisk * (Math.random() * 3 + 1); // 1x to 4x virtual risk
+           }
+        }
 
         // MFE generation
-        // If win, MFE >= reward
-        // If loss, MFE is usually small
         const mfePoints = isWin
           ? rewardPoints * (Math.random() * 0.2 + 1)
-          : Math.random() * (riskPoints * 0.5);
+          : Math.random() * (virtualRisk * 0.5);
 
         trades.push({
           id: `TRD-${tradeIdCounter++}`,
@@ -90,22 +107,26 @@ const generateMockTrades = (): Trade[] => {
           commission: -5,
           swap: 0,
           netPnl: Number((pnl - 5).toFixed(2)),
-          tags: isWin ? ["Trend", "A+"] : ["Chop", "Mistake"],
+          tags: isWin ? ["Trend", "A+"] : !hasSL ? ["No SL", "Risky"] : ["Chop"],
           setup: isWin ? "Breakout" : "Reversal",
-          notes: isWin ? "Great execution" : "Forced the trade",
+          notes: !hasSL ? "Managed manually without hard SL." : "Standard execution.",
           
           mae: Number(maePoints.toFixed(1)),
+          mae_cash: Number((maePoints * valuePerPoint).toFixed(2)),
           mfe: Number(mfePoints.toFixed(1)),
-          risk: Number(riskPoints.toFixed(1)),
+          
+          risk: riskPoints ? Number(riskPoints.toFixed(1)) : null,
+          risk_cash: riskPoints ? Number((riskPoints * valuePerPoint).toFixed(2)) : null,
+          
           entry_price: openPrice,
-          sl_price: side === "BUY" ? openPrice - (riskPoints * 0.0001) : openPrice + (riskPoints * 0.0001),
-          tp_price: side === "BUY" ? openPrice + (riskPoints * 2 * 0.0001) : openPrice - (riskPoints * 2 * 0.0001),
+          sl_price: hasSL ? (side === "BUY" ? openPrice - (riskPoints! * 0.0001) : openPrice + (riskPoints! * 0.0001)) : null,
+          tp_price: hasSL ? (side === "BUY" ? openPrice + (riskPoints! * 2 * 0.0001) : openPrice - (riskPoints! * 2 * 0.0001)) : null,
 
           aiSummary: {
             summary: isWin ? "Clean move, followed plan." : "Entered too early against momentum.",
             execution: isWin ? "Good" : "Bad",
-            mistake: isWin ? null : "FOMO",
-            improvement: isWin ? "Add to winner next time" : "Wait for candle close"
+            mistake: !hasSL ? "Trading without SL" : null,
+            improvement: !hasSL ? "Always define max risk" : "Wait for candle close"
           }
         });
       }
