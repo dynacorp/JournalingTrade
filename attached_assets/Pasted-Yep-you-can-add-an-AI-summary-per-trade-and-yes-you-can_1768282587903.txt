@@ -1,0 +1,105 @@
+Yep — you can add an **AI summary per trade**, and yes you can use **your own OpenAI API account** for it. The key thing is: keep the API key **server-side** (never in the UI or in MT5). OpenAI explicitly recommends routing requests through your backend so your key isn’t exposed. ([OpenAI Help Center][1])
+
+## Personal-only app features (remove SaaS stuff)
+
+### A) MT5 → Your API (Auto-journal pipeline)
+
+* **MT5 Journal EA** that:
+
+  * Detects closed trades (and partial closes)
+  * Sends trade payloads to your API (HTTP POST)
+  * Has a **retry queue** when your API is down
+  * Sends a periodic **heartbeat** (optional but useful)
+* **API Key for MT5 → Your API** (simple shared secret)
+
+### B) Trade Store (Database + ingestion)
+
+* Save every trade (“deal”) with:
+
+  * symbol, side, volume, open/close time, open/close price
+  * net P&L + commission/swap/fees
+  * SL/TP, comment/magic
+* **Deduplication** so re-sends don’t create duplicates (unique constraint on `deal_id + account_id`)
+* Basic “sync status” page:
+
+  * last received trade time
+  * last error (if any)
+
+### C) Core UI you actually need
+
+* **Calendar P&L** (like your screenshot)
+
+  * daily P&L + trade count
+  * weekly totals + monthly total
+  * click day → list of trades that day
+* **Trades list**
+
+  * filters: date range, symbol, side
+  * search by comment/tag
+* **Trade detail**
+
+  * full numbers + chart snapshots (optional)
+  * manual notes + tags (setup, mistake)
+* **Dashboard (simple)**
+
+  * equity curve
+  * win rate, profit factor, max drawdown, avg R (if you track risk)
+
+### D) AI Summary per trade (your request)
+
+* Auto-generate a short structured summary like:
+
+  * “What happened”
+  * “Good / bad execution”
+  * “Likely mistake (if any)”
+  * “One improvement”
+  * “Tag suggestions (setup/mistake)”
+* Store the AI output on the trade record (so it’s searchable)
+
+### E) Optional but high value (personal)
+
+* Auto-screenshot on entry/exit (stored with trade)
+* Weekly review page (auto-generated: best days, worst days, top mistake)
+* Rule flags (soft warnings): “overtrade day”, “hit daily loss limit”, “traded outside session”
+
+---
+
+## Can you connect *your* OpenAI API account?
+
+Yes.
+
+**Best practice**: your app backend calls OpenAI with your API key stored in an environment variable/secret manager — not in the browser, not in MT5. ([OpenAI Help Center][1])
+Use the OpenAI **Responses API** on your server to generate the summaries. ([OpenAI Platform][2])
+
+### Recommended flow
+
+1. MT5 posts trade → your API
+2. API stores trade in DB
+3. API triggers “AI summarize trade” job
+4. Backend calls OpenAI Responses API
+5. Save summary back to DB → shown in UI
+
+### Cost control (important)
+
+* Only summarize **closed trades**
+* Add a toggle: “AI summary ON/OFF”
+* Use the Usage/Costs endpoints to monitor spend if you want. ([OpenAI Platform][3])
+
+---
+
+## What I need from you (so I tailor the final spec, no extra fluff)
+
+* Your backend stack: **Node/Express** or **Spring Boot**?
+* Where are you hosting the API: **Render / VPS / Local**?
+* Do you want screenshots (yes/no)?
+
+If you answer those 3, I’ll give you a tight, personal-only blueprint:
+
+* exact endpoints
+* exact JSON payload MT5 should send
+* DB schema
+* and the exact AI prompt + response JSON format for the summaries.
+
+[1]: https://help.openai.com/en/articles/5112595-best-practices-for-api-key-safety?utm_source=chatgpt.com "Best Practices for API Key Safety"
+[2]: https://platform.openai.com/docs/api-reference/responses?utm_source=chatgpt.com "Responses | OpenAI API Reference"
+[3]: https://platform.openai.com/docs/api-reference/usage?utm_source=chatgpt.com "Usage | OpenAI API Reference"
