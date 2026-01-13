@@ -16,6 +16,14 @@ export type Trade = {
   tags: string[];
   setup: string;
   notes: string;
+  // Risk & Drawdown fields
+  mae: number; // Maximum Adverse Excursion (points/pips)
+  mfe: number; // Maximum Favorable Excursion (points/pips)
+  risk: number; // Planned Stop Loss distance (points/pips)
+  entry_price: number; 
+  sl_price: number;
+  tp_price: number;
+  
   aiSummary?: {
     summary: string;
     execution: "Good" | "Bad" | "Neutral";
@@ -43,26 +51,56 @@ const generateMockTrades = (): Trade[] => {
       
       for (let i = 0; i < numTrades; i++) {
         const isWin = Math.random() > 0.45; // 55% win rate
-        const pnl = isWin 
-          ? Math.floor(Math.random() * 500) + 100 
-          : -Math.floor(Math.random() * 300) - 50;
+        const side = Math.random() > 0.5 ? "BUY" : "SELL";
         
+        // Mock points calculation (simplified)
+        const riskPoints = Math.floor(Math.random() * 20) + 10; // 10-30 points risk
+        const rewardPoints = isWin 
+          ? riskPoints * (Math.random() * 2 + 1) // 1R to 3R
+          : -Math.min(riskPoints * (Math.random() * 0.5 + 0.8), riskPoints); // 0.8R to 1R loss
+        
+        const openPrice = side === "BUY" ? 1.0850 : 1.0900; // Simplified
+        const riskAmount = 100; // $100 risk per trade
+        const pnl = (rewardPoints / riskPoints) * riskAmount;
+
+        // MAE generation
+        // If it's a win, MAE is usually small (0 to 80% of risk)
+        // If it's a loss, MAE usually hits 100% of risk (hit SL) or close to it
+        const maePoints = isWin 
+          ? Math.random() * (riskPoints * 0.8) 
+          : riskPoints * (Math.random() * 0.2 + 0.9); // 90-110% of risk (slippage)
+
+        // MFE generation
+        // If win, MFE >= reward
+        // If loss, MFE is usually small
+        const mfePoints = isWin
+          ? rewardPoints * (Math.random() * 0.2 + 1)
+          : Math.random() * (riskPoints * 0.5);
+
         trades.push({
           id: `TRD-${tradeIdCounter++}`,
           symbol: ["EURUSD", "GBPUSD", "XAUUSD", "NAS100", "US30"][Math.floor(Math.random() * 5)],
-          side: Math.random() > 0.5 ? "BUY" : "SELL",
+          side,
           volume: Math.floor(Math.random() * 20) / 10 + 0.1,
-          openPrice: 0, // Mock values
-          closePrice: 0,
+          openPrice,
+          closePrice: openPrice + (side === "BUY" ? rewardPoints * 0.0001 : -rewardPoints * 0.0001),
           openTime: addDays(day, 0).toISOString(),
           closeTime: addDays(day, 0).toISOString(),
-          pnl: pnl,
+          pnl: Number(pnl.toFixed(2)),
           commission: -5,
           swap: 0,
-          netPnl: pnl - 5,
+          netPnl: Number((pnl - 5).toFixed(2)),
           tags: isWin ? ["Trend", "A+"] : ["Chop", "Mistake"],
           setup: isWin ? "Breakout" : "Reversal",
           notes: isWin ? "Great execution" : "Forced the trade",
+          
+          mae: Number(maePoints.toFixed(1)),
+          mfe: Number(mfePoints.toFixed(1)),
+          risk: Number(riskPoints.toFixed(1)),
+          entry_price: openPrice,
+          sl_price: side === "BUY" ? openPrice - (riskPoints * 0.0001) : openPrice + (riskPoints * 0.0001),
+          tp_price: side === "BUY" ? openPrice + (riskPoints * 2 * 0.0001) : openPrice - (riskPoints * 2 * 0.0001),
+
           aiSummary: {
             summary: isWin ? "Clean move, followed plan." : "Entered too early against momentum.",
             execution: isWin ? "Good" : "Bad",

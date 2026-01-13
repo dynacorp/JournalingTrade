@@ -1,0 +1,94 @@
+You’re not forced to store a lot. If your only goal is **“drawdown per trade”**, you can keep the DB lean and still get what you want.
+
+## What you actually need to store (minimal)
+
+For each *closed trade event*, store **only**:
+
+### Identity + time (for grouping + dedupe)
+
+* `deal_id` (unique from MT5)
+* `account_id`
+* `symbol`
+* `side` (BUY/SELL)
+* `open_time_utc`
+* `close_time_utc`
+
+### Entry/exit (needed to interpret MAE)
+
+* `entry_price`
+* `close_price`
+* `volume` *(optional, but useful if you ever want money-based MAE)*
+
+### The drawdown you care about (MAE)
+
+* `mae_points` **(this is your “per-trade drawdown”)**
+* `mae_price` *(optional but nice for debugging/verification)*
+* `mae_time_utc` *(optional but nice)*
+
+That’s it.
+
+If you store just `mae_points`, you can build your UI and analytics around “worst heat per trade” with almost no storage.
+
+---
+
+## Strong recommendation: keep ONE extra field
+
+Even if you only care about drawdown, store **risk at entry** so you can normalize it:
+
+* `risk_points` (distance from entry to SL, if SL exists)
+
+Then you can show:
+
+* `mae_R = mae_points / risk_points`
+
+This is insanely helpful because “120 points drawdown” means nothing unless you know your planned stop distance.
+
+If you truly don’t want it, you can drop it—but it’s small and high value.
+
+---
+
+## What you should NOT store (if you want a clean DB)
+
+Unless you need them later, you can skip:
+
+* Tick history (huge)
+* MFE (favorable excursion)
+* All OHLC snapshots
+* Comments/magic
+* Every SL/TP modification event
+* Screenshots
+
+You can still compute MAE in MT5 and only ship the final MAE values.
+
+---
+
+## Minimal payload to send to your server
+
+Send only this JSON on trade close:
+
+* `deal_id`, `account_id`
+* `symbol`, `side`
+* `open_time_utc`, `close_time_utc`
+* `entry_price`, `close_price`
+* `mae_points`
+* *(optional)* `mae_price`, `mae_time_utc`
+* *(optional)* `risk_points`
+
+---
+
+## Practical tip: store “points” not “money”
+
+For synthetic indices, “points” is stable for analysis and avoids broker/currency confusion.
+
+If you later want money metrics, you can compute using `volume` + contract size—but you don’t need it for per-trade drawdown.
+
+---
+
+### Bottom line
+
+If the only feature is “drawdown per trade,” your DB can be very small:
+
+* **1 row per trade**
+* **MAE points** (+ optional risk_points)
+
+If you tell me which index you trade (V25 1s etc.), I’ll propose the exact table columns with types (Postgres) in ~10 lines.
