@@ -4,7 +4,7 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Trade } from "@/lib/mock-data";
+import type { Trade } from "@shared/schema";
 import { format } from "date-fns";
 import { Sparkles, AlertTriangle, CheckCircle2, ShieldAlert, Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,7 @@ interface TradeDetailProps {
 export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
   if (!trade) return null;
 
-  const isWin = trade.netPnl > 0;
+  const isWin = trade.net_pnl > 0;
   
   // Calculate percentages for the drawdown visualization
   // If NO SL, we use a synthetic "risk" baseline of 20 points just for visualization scaling
@@ -42,7 +42,7 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
               </div>
               <div className="text-right">
                 <div className={`text-2xl font-mono font-bold ${isWin ? "text-profit" : "text-loss"}`}>
-                  {isWin ? "+" : ""}{trade.netPnl.toFixed(2)}
+                  {isWin ? "+" : ""}{trade.net_pnl.toFixed(2)}
                 </div>
                 <div className="text-xs text-muted-foreground">Net P&L</div>
               </div>
@@ -59,7 +59,7 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
               </div>
               <div>
                 <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Exit</div>
-                <div className="font-mono font-medium">{trade.closePrice.toFixed(4)}</div>
+                <div className="font-mono font-medium">{trade.close_price.toFixed(4)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Risk</div>
@@ -165,28 +165,28 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
               <h3 className="text-sm font-semibold uppercase tracking-wider">AI Trade Analysis</h3>
             </div>
             
-            {trade.aiSummary ? (
+            {trade.ai_summary ? (
               <div className="space-y-4">
                 <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
                   <div className="flex items-start gap-3">
-                    {trade.aiSummary.execution === "Good" ? (
+                    {trade.ai_execution === "Good" ? (
                       <CheckCircle2 className="w-5 h-5 text-profit mt-0.5" />
-                    ) : trade.aiSummary.execution === "Bad" ? (
+                    ) : trade.ai_execution === "Bad" ? (
                       <AlertTriangle className="w-5 h-5 text-loss mt-0.5" />
                     ) : (
                       <div className="w-5 h-5 rounded-full border-2 border-muted-foreground mt-0.5" />
                     )}
                     <div>
-                      <h4 className="font-medium text-sm mb-1">{trade.aiSummary.summary}</h4>
-                      {trade.aiSummary.mistake && (
+                      <h4 className="font-medium text-sm mb-1">{trade.ai_summary}</h4>
+                      {trade.ai_mistake && (
                         <p className="text-xs text-loss mt-2 flex items-center gap-1.5 font-medium bg-loss/10 p-2 rounded">
                           <AlertTriangle className="w-3 h-3" />
-                          Mistake: {trade.aiSummary.mistake}
+                          Mistake: {trade.ai_mistake}
                         </p>
                       )}
-                      {trade.aiSummary.improvement && (
+                      {trade.ai_improvement && (
                         <p className="text-xs text-muted-foreground mt-2 italic">
-                          "Tip: {trade.aiSummary.improvement}"
+                          Tip: {trade.ai_improvement}
                         </p>
                       )}
                     </div>
@@ -205,30 +205,32 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Trade Setup & Tags</h3>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline" className="bg-background">{trade.setup}</Badge>
-                {trade.tags.map(tag => (
+                {trade.setup && <Badge variant="outline" className="bg-background">{trade.setup}</Badge>}
+                {trade.tags && trade.tags.map(tag => (
                   <Badge key={tag} variant="secondary" className="opacity-80">{tag}</Badge>
                 ))}
               </div>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Manual Notes</h3>
-              <div className="p-4 rounded-md bg-muted/30 border border-border text-sm leading-relaxed font-mono">
-                {trade.notes}
+            {trade.notes && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Manual Notes</h3>
+                <div className="p-4 rounded-md bg-muted/30 border border-border text-sm leading-relaxed font-mono">
+                  {trade.notes}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Execution Data</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Open Time</span>
-                  <span className="font-mono">{format(new Date(trade.openTime), "MMM d, HH:mm:ss")}</span>
+                  <span className="font-mono">{format(new Date(trade.open_time), "MMM d, HH:mm:ss")}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Close Time</span>
-                  <span className="font-mono">{format(new Date(trade.closeTime), "MMM d, HH:mm:ss")}</span>
+                  <span className="font-mono">{format(new Date(trade.close_time), "MMM d, HH:mm:ss")}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Commission</span>

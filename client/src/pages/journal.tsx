@@ -2,22 +2,33 @@ import { useState } from "react";
 import { Layout } from "@/components/layout";
 import { CalendarPnL } from "@/components/calendar-pnl";
 import { TradeDetail } from "@/components/trade-detail";
-import { MOCK_TRADES, Trade } from "@/lib/mock-data";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search } from "lucide-react";
+import { useTrades } from "@/hooks/use-trades";
+import type { Trade } from "@shared/schema";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Loader2 } from "lucide-react";
 
 export default function Journal() {
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  
+  const { data: trades = [], isLoading } = useTrades();
 
   // Filter trades based on date if selected in calendar
   const filteredTrades = selectedDate 
-    ? MOCK_TRADES.filter(t => new Date(t.closeTime).toDateString() === selectedDate.toDateString())
+    ? trades.filter(t => new Date(t.close_time).toDateString() === selectedDate.toDateString())
     : [];
+  
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-screen">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -34,7 +45,7 @@ export default function Journal() {
             <div className="grid lg:grid-cols-3 gap-6 h-full">
               <div className="lg:col-span-2 overflow-auto h-full flex flex-col">
                 <CalendarPnL 
-                  trades={MOCK_TRADES} 
+                  trades={trades} 
                   onSelectDate={setSelectedDate}
                   selectedDate={selectedDate}
                   onSelectTrade={setSelectedTrade}
@@ -90,16 +101,16 @@ export default function Journal() {
                             </div>
                             <span className={cn(
                               "font-mono font-medium text-sm",
-                              trade.netPnl > 0 ? "text-profit" : "text-loss"
+                              trade.net_pnl > 0 ? "text-profit" : "text-loss"
                             )}>
-                              {trade.netPnl > 0 ? "+" : ""}{trade.netPnl.toFixed(0)}
+                              {trade.net_pnl > 0 ? "+" : ""}{trade.net_pnl.toFixed(0)}
                             </span>
                           </div>
                           <div className="flex justify-between items-end pl-2">
                             <span className="text-xs text-muted-foreground">{trade.setup}</span>
                             <div className="flex gap-2 text-xs font-mono text-muted-foreground">
                               <span>MAE: -${trade.mae_cash.toFixed(2)}</span>
-                              <span>{format(new Date(trade.closeTime), "HH:mm")}</span>
+                              <span>{format(new Date(trade.close_time), "HH:mm")}</span>
                             </div>
                           </div>
                         </div>

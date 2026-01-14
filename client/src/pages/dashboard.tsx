@@ -1,41 +1,77 @@
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EquityChart } from "@/components/equity-chart";
-import { MOCK_STATS, MOCK_TRADES } from "@/lib/mock-data";
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles } from "lucide-react";
+import { useTrades } from "@/hooks/use-trades";
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMemo } from "react";
 
 export default function Dashboard() {
-  const stats = [
-    {
-      label: "Net Profit",
-      value: `+$${MOCK_STATS.equityCurve[MOCK_STATS.equityCurve.length - 1].equity - 10000}`,
-      subtext: "+10.93% this month",
-      icon: DollarSign,
-      trend: "up"
-    },
-    {
-      label: "Win Rate",
-      value: `${MOCK_STATS.winRate}%`,
-      subtext: "Last 20 trades",
-      icon: Activity,
-      trend: "neutral"
-    },
-    {
-      label: "Profit Factor",
-      value: MOCK_STATS.profitFactor,
-      subtext: "Gross Profit / Gross Loss",
-      icon: TrendingUp,
-      trend: "up"
-    },
-    {
-      label: "Avg R-Multiple",
-      value: `${MOCK_STATS.avgR}R`,
-      subtext: "Risk Reward Ratio",
-      icon: BarChart3,
-      trend: "up"
+  const { data: trades = [], isLoading } = useTrades();
+
+  const stats = useMemo(() => {
+    if (!trades.length) {
+      return [
+        { label: "Net Profit", value: "$0.00", subtext: "No trades yet", icon: DollarSign, trend: "neutral" },
+        { label: "Win Rate", value: "0%", subtext: "No trades yet", icon: Activity, trend: "neutral" },
+        { label: "Profit Factor", value: "0.0", subtext: "Gross Profit / Gross Loss", icon: TrendingUp, trend: "neutral" },
+        { label: "Avg R-Multiple", value: "0.0R", subtext: "Risk Reward Ratio", icon: BarChart3, trend: "neutral" }
+      ];
     }
-  ];
+
+    const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
+    const wins = trades.filter(t => t.net_pnl > 0).length;
+    const winRate = ((wins / trades.length) * 100).toFixed(0);
+    
+    const grossProfit = trades.filter(t => t.net_pnl > 0).reduce((sum, t) => sum + t.net_pnl, 0);
+    const grossLoss = Math.abs(trades.filter(t => t.net_pnl < 0).reduce((sum, t) => sum + t.net_pnl, 0));
+    const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(1) : "∞";
+    
+    const avgR = trades
+      .filter(t => t.risk && t.risk_cash)
+      .reduce((sum, t) => sum + (t.net_pnl / (t.risk_cash || 1)), 0) / Math.max(1, trades.filter(t => t.risk).length);
+
+    return [
+      {
+        label: "Net Profit",
+        value: totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`,
+        subtext: `${trades.length} total trades`,
+        icon: DollarSign,
+        trend: totalPnl > 0 ? "up" : "down"
+      },
+      {
+        label: "Win Rate",
+        value: `${winRate}%`,
+        subtext: `${wins} wins, ${trades.length - wins} losses`,
+        icon: Activity,
+        trend: "neutral"
+      },
+      {
+        label: "Profit Factor",
+        value: profitFactor,
+        subtext: "Gross Profit / Gross Loss",
+        icon: TrendingUp,
+        trend: parseFloat(profitFactor) > 1 ? "up" : "down"
+      },
+      {
+        label: "Avg R-Multiple",
+        value: `${avgR.toFixed(1)}R`,
+        subtext: "Risk Reward Ratio",
+        icon: BarChart3,
+        trend: avgR > 1 ? "up" : "down"
+      }
+    ];
+  }, [trades]);
+
+  if (isLoading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-screen">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -73,26 +109,32 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="flex-1 overflow-auto pr-2">
               <div className="space-y-4">
-                {MOCK_TRADES.slice(0, 5).map(trade => (
-                  <div key={trade.id} className="flex items-center justify-between text-sm group cursor-pointer hover:bg-accent/50 p-2 rounded-md -mx-2 transition-colors">
-                    <div className="flex items-center gap-3">
+                {trades.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-8">
+                    No trades yet. Start by adding your first trade!
+                  </div>
+                ) : (
+                  trades.slice(0, 5).map(trade => (
+                    <div key={trade.id} className="flex items-center justify-between text-sm group cursor-pointer hover:bg-accent/50 p-2 rounded-md -mx-2 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          trade.net_pnl > 0 ? "bg-profit" : "bg-loss"
+                        )} />
+                        <div className="flex flex-col">
+                          <span className="font-bold font-mono">{trade.symbol}</span>
+                          <span className="text-xs text-muted-foreground capitalize">{trade.side.toLowerCase()} • {trade.volume} lot</span>
+                        </div>
+                      </div>
                       <div className={cn(
-                        "w-2 h-2 rounded-full",
-                        trade.netPnl > 0 ? "bg-profit" : "bg-loss"
-                      )} />
-                      <div className="flex flex-col">
-                        <span className="font-bold font-mono">{trade.symbol}</span>
-                        <span className="text-xs text-muted-foreground capitalize">{trade.side.toLowerCase()} • {trade.volume} lot</span>
+                        "font-mono font-medium",
+                        trade.net_pnl > 0 ? "text-profit" : "text-loss"
+                      )}>
+                        {trade.net_pnl > 0 ? "+" : ""}{trade.net_pnl.toFixed(0)}
                       </div>
                     </div>
-                    <div className={cn(
-                      "font-mono font-medium",
-                      trade.netPnl > 0 ? "text-profit" : "text-loss"
-                    )}>
-                      {trade.netPnl > 0 ? "+" : ""}{trade.netPnl}
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>

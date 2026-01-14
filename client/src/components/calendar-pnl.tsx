@@ -14,7 +14,7 @@ import {
 import { ChevronLeft, ChevronRight, LayoutList, Calendar as CalendarIcon, Grid3X3, List } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Trade } from "@/lib/mock-data";
+import type { Trade } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 
 interface CalendarPnLProps {
@@ -55,15 +55,15 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
 
     // Calculate Monthly PnL (only for this month's trades)
     const mPnL = trades
-      .filter(t => isSameMonth(new Date(t.closeTime), currentMonth))
-      .reduce((sum, t) => sum + t.netPnl, 0);
+      .filter(t => isSameMonth(new Date(t.close_time), currentMonth))
+      .reduce((sum, t) => sum + t.net_pnl, 0);
 
     return { weeks: rows, monthlyPnL: mPnL };
   }, [currentMonth, trades]);
 
   const getDayData = (date: Date) => {
-    const dayTrades = trades.filter(t => isSameDay(new Date(t.closeTime), date));
-    const dailyPnL = dayTrades.reduce((sum, t) => sum + t.netPnl, 0);
+    const dayTrades = trades.filter(t => isSameDay(new Date(t.close_time), date));
+    const dailyPnL = dayTrades.reduce((sum, t) => sum + t.net_pnl, 0);
     const count = dayTrades.length;
     return { dailyPnL, count, trades: dayTrades };
   };
@@ -82,7 +82,7 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
   };
 
   // Get current month's trades for list view
-  const currentMonthTrades = trades.filter(t => isSameMonth(new Date(t.closeTime), currentMonth));
+  const currentMonthTrades = trades.filter(t => isSameMonth(new Date(t.close_time), currentMonth));
 
   return (
     <div className="space-y-4 h-full flex flex-col">
@@ -244,7 +244,7 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                 </tr>
               </thead>
               <tbody>
-                {currentMonthTrades.length > 0 ? currentMonthTrades.sort((a,b) => new Date(b.closeTime).getTime() - new Date(a.closeTime).getTime()).map((trade) => {
+                {currentMonthTrades.length > 0 ? currentMonthTrades.sort((a,b) => new Date(b.close_time).getTime() - new Date(a.close_time).getTime()).map((trade) => {
                    // Logic for ratio: If no risk, use 20 as base for visual
                    const visualRiskBaseline = trade.risk || 20;
                    const maeRatio = Math.min(trade.mae / visualRiskBaseline, 1.2);
@@ -256,7 +256,7 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                       className="border-b transition-colors hover:bg-muted/50 cursor-pointer"
                       onClick={() => onSelectTrade?.(trade)}
                     >
-                      <td className="p-4 align-middle font-mono text-xs">{format(new Date(trade.closeTime), "dd MMM HH:mm")}</td>
+                      <td className="p-4 align-middle font-mono text-xs">{format(new Date(trade.close_time), "dd MMM HH:mm")}</td>
                       <td className="p-4 align-middle font-bold text-xs">{trade.symbol}</td>
                       <td className="p-4 align-middle text-center">
                          <Badge variant={trade.side === "BUY" ? "default" : "destructive"} className="px-1.5 py-0 text-[10px]">
@@ -285,9 +285,9 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                       </td>
                       <td className={cn(
                         "p-4 align-middle text-right font-mono font-bold",
-                        trade.netPnl > 0 ? "text-profit" : "text-loss"
+                        trade.net_pnl > 0 ? "text-profit" : "text-loss"
                       )}>
-                        {trade.netPnl > 0 ? "+" : ""}{trade.netPnl.toFixed(0)}
+                        {trade.net_pnl > 0 ? "+" : ""}{trade.net_pnl.toFixed(0)}
                       </td>
                     </tr>
                    );
