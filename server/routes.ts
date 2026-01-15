@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertTradeSchema } from "@shared/schema";
+import { insertTradeSchema, insertMT5AccountSchema } from "@shared/schema";
 import { generateTradeAnalysis } from "./openai";
 import { fromZodError } from "zod-validation-error";
 
@@ -10,7 +10,76 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
-  // POST /api/trades - Ingest trade from MT5 or manual entry
+  // POST /api/trades/ingest - Secure endpoint for EA to send trades (requires ingestion_key)
+  app.post("/api/trades/ingest", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Missing or invalid authorization header" });
+      }
+      
+      const ingestionKey = authHeader.substring(7);
+      const mt5Account = await storage.getMT5AccountByIngestionKey(ingestionKey);
+      
+      if (!mt5Account) {
+        return res.status(401).json({ error: "Invalid ingestion key" });
+      }
+      
+      // Validate that the trade's account_id and broker match the MT5 account
+      const { account_id, broker, ...tradeData } = req.body;
+      
+      if (account_id !== mt5Account.account_id) {
+        return res.status(403).json({ error: "Account ID mismatch" });
+      }
+      
+      const validatedTrade = insertTradeSchema.parse({
+        ...tradeData,
+        account_id: mt5Account.account_id,
+      });
+      
+      // Check for duplicate trade (broker + account_id + deal_id)
+      const existing = await storage.getTradeByDealId(
+        validatedTrade.deal_id,
+        validatedTrade.account_id
+      );
+      
+      if (existing) {
+        return res.status(409).json({ 
+          error: "Trade already exists",
+          trade: existing 
+        });
+      }
+      
+      // Generate AI analysis
+      const tempTrade = {
+        ...validatedTrade,
+        id: 0,
+        created_at: new Date(),
+      };
+      
+      const analysis = await generateTradeAnalysis(tempTrade as any);
+      const finalTradeData = {
+        ...validatedTrade,
+        ai_summary: analysis.summary,
+        ai_execution: analysis.execution,
+        ai_mistake: analysis.mistake,
+        ai_improvement: analysis.improvement,
+        ai_generated: true,
+      };
+      
+      const newTrade = await storage.createTrade(finalTradeData);
+      res.status(201).json(newTrade);
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        const validationError = fromZodError(error);
+        return res.status(400).json({ error: validationError.message });
+      }
+      console.error("Error ingesting trade:", error);
+      res.status(500).json({ error: "Failed to ingest trade" });
+    }
+  });
+
+  // POST /api/trades - Internal trade creation (for manual entry)
   app.post("/api/trades", async (req, res) => {
     try {
       const validatedTrade = insertTradeSchema.parse(req.body);
@@ -118,6 +187,83 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error updating trade:", error);
       res.status(500).json({ error: "Failed to update trade" });
+    }
+  });
+
+  // ==================== MT5 ACCOUNTS ====================
+  
+  // GET /api/mt5-accounts - Get all MT5 accounts
+  app.get("/api/mt5-accounts", async (req, res) => {
+    try {
+      const accounts = await storage.getAllMT5Accounts();
+      res.json(accounts);
+    } catch (error) {
+      console.error("Error fetching MT5 accounts:", error);
+      res.status(500).json({ error: "Failed to fetch MT5 accounts" });
+    }
+  });
+
+  // POST /api/mt5-accounts - Create new MT5 account connection
+  app.post("/api/mt5-accounts", async (req, res) => {
+    try {
+      const validated = insertMT5AccountSchema.parse(req.body);
+      
+      // Check if account already exists
+      const existing = await storage.getMT5AccountByAccountAndBroker(
+        validated.account_id,
+        validated.broker
+      );
+      
+      if (existing) {
+        return res.status(409).json({ 
+          error: "MT5 account already connected",
+          account: existing
+        });
+      }
+      
+      const newAccount = await storage.createMT5Account(validated);
+      res.status(201).json(newAccount);
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        const validationError = fromZodError(error);
+        return res.status(400).json({ error: validationError.message });
+      }
+      console.error("Error creating MT5 account:", error);
+      res.status(500).json({ error: "Failed to create MT5 account" });
+    }
+  });
+
+  // DELETE /api/mt5-accounts/:id - Delete MT5 account
+  app.delete("/api/mt5-accounts/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteMT5Account(id);
+      
+      if (!deleted) {
+        return res.status(404).json({ error: "MT5 account not found" });
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting MT5 account:", error);
+      res.status(500).json({ error: "Failed to delete MT5 account" });
+    }
+  });
+
+  // POST /api/mt5-accounts/:id/regenerate-key - Regenerate ingestion key
+  app.post("/api/mt5-accounts/:id/regenerate-key", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const account = await storage.regenerateIngestionKey(id);
+      
+      if (!account) {
+        return res.status(404).json({ error: "MT5 account not found" });
+      }
+      
+      res.json(account);
+    } catch (error) {
+      console.error("Error regenerating key:", error);
+      res.status(500).json({ error: "Failed to regenerate key" });
     }
   });
 

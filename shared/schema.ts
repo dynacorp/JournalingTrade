@@ -9,6 +9,16 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
 });
 
+export const mt5Accounts = pgTable("mt5_accounts", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  account_id: varchar("account_id", { length: 100 }).notNull(),
+  broker: varchar("broker", { length: 100 }).notNull(),
+  ingestion_key: varchar("ingestion_key", { length: 64 }).notNull().unique(),
+  is_active: boolean("is_active").default(true).notNull(),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const trades = pgTable("trades", {
   id: serial("id").primaryKey(),
   
@@ -74,7 +84,15 @@ export const insertUserSchema = createInsertSchema(users).pick({
   password: true,
 });
 
+export const insertMT5AccountSchema = createInsertSchema(mt5Accounts).omit({
+  id: true,
+  ingestion_key: true,
+  created_at: true,
+});
+
 export type InsertTrade = z.infer<typeof insertTradeSchema>;
 export type Trade = typeof trades.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+export type InsertMT5Account = z.infer<typeof insertMT5AccountSchema>;
+export type MT5Account = typeof mt5Accounts.$inferSelect;
