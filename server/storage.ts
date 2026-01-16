@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, users, trades, mt5Accounts } from "@shared/schema";
+import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, users, trades, mt5Accounts, appSettings } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -25,6 +25,10 @@ export interface IStorage {
   createMT5Account(account: InsertMT5Account): Promise<MT5Account>;
   deleteMT5Account(id: number): Promise<boolean>;
   regenerateIngestionKey(id: number): Promise<MT5Account | undefined>;
+  
+  // App Settings operations
+  getSetting(key: string): Promise<string | undefined>;
+  setSetting(key: string, value: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -92,14 +96,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTrade(trade: InsertTrade): Promise<Trade> {
-    const result = await db.insert(trades).values(trade).returning();
+    const tradeWithDates = {
+      ...trade,
+      open_time: new Date(trade.open_time),
+      close_time: new Date(trade.close_time),
+    };
+    const result = await db.insert(trades).values(tradeWithDates).returning();
     return result[0];
   }
 
   async updateTrade(id: number, updates: Partial<InsertTrade>): Promise<Trade | undefined> {
+    const updatesWithDates: any = { ...updates };
+    if (updates.open_time) updatesWithDates.open_time = new Date(updates.open_time);
+    if (updates.close_time) updatesWithDates.close_time = new Date(updates.close_time);
+    
     const result = await db
       .update(trades)
-      .set(updates)
+      .set(updatesWithDates)
       .where(eq(trades.id, id))
       .returning();
     return result[0];
@@ -155,6 +168,28 @@ export class DatabaseStorage implements IStorage {
       .where(eq(mt5Accounts.id, id))
       .returning();
     return result[0];
+  }
+
+  // App Settings operations
+  async getSetting(key: string): Promise<string | undefined> {
+    const result = await db
+      .select()
+      .from(appSettings)
+      .where(eq(appSettings.key, key))
+      .limit(1);
+    return result[0]?.value;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const existing = await this.getSetting(key);
+    if (existing !== undefined) {
+      await db
+        .update(appSettings)
+        .set({ value })
+        .where(eq(appSettings.key, key));
+    } else {
+      await db.insert(appSettings).values({ key, value });
+    }
   }
 }
 

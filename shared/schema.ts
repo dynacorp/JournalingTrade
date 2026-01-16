@@ -9,6 +9,12 @@ export const users = pgTable("users", {
   password: text("password").notNull(),
 });
 
+export const appSettings = pgTable("app_settings", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 100 }).notNull().unique(),
+  value: text("value").notNull(),
+});
+
 export const mt5Accounts = pgTable("mt5_accounts", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),

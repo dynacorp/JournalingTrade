@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,14 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useMT5Accounts, useCreateMT5Account, useDeleteMT5Account, useRegenerateMT5Key } from "@/hooks/use-mt5-accounts";
-import { User, Bell, Palette, Database, Plus, Copy, RefreshCw, Trash2, Key, Loader2, CheckCircle2, ExternalLink } from "lucide-react";
+import { User, Bell, Palette, Database, Plus, Copy, RefreshCw, Trash2, Key, Loader2, CheckCircle2, ExternalLink, Sparkles } from "lucide-react";
 import { format } from "date-fns";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function Settings() {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: mt5Accounts = [], isLoading } = useMT5Accounts();
   const createAccount = useCreateMT5Account();
   const deleteAccount = useDeleteMT5Account();
@@ -25,6 +28,26 @@ export default function Settings() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newAccount, setNewAccount] = useState({ name: "", account_id: "", broker: "", initial_balance: "0" });
   const [copiedKey, setCopiedKey] = useState<number | null>(null);
+
+  const { data: aiSetting } = useQuery({
+    queryKey: ["settings", "ai_analysis_enabled"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/settings/ai_analysis_enabled");
+      return res.json();
+    },
+  });
+
+  const aiEnabled = aiSetting?.value !== "false";
+
+  const updateAiSetting = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await apiRequest("PUT", "/api/settings/ai_analysis_enabled", { value: enabled ? "true" : "false" });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings", "ai_analysis_enabled"] });
+      toast({ title: "Updated", description: "AI analysis setting saved" });
+    },
+  });
 
   const handleCreateAccount = async () => {
     if (!newAccount.name || !newAccount.account_id || !newAccount.broker) {
@@ -313,6 +336,33 @@ export default function Settings() {
                   </Select>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary" />
+                <CardTitle>AI Analysis</CardTitle>
+              </div>
+              <CardDescription>Configure OpenAI-powered trade analysis.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable AI Analysis</Label>
+                  <p className="text-sm text-muted-foreground">Automatically analyze trades using OpenAI when they are ingested</p>
+                </div>
+                <Switch 
+                  checked={aiEnabled} 
+                  onCheckedChange={(checked) => updateAiSetting.mutate(checked)}
+                  disabled={updateAiSetting.isPending}
+                  data-testid="switch-ai-enabled" 
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                When disabled, trades will be saved without AI summaries. You can turn this off if you're experiencing API errors.
+              </p>
             </CardContent>
           </Card>
 

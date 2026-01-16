@@ -50,22 +50,40 @@ export async function registerRoutes(
         });
       }
       
-      // Generate AI analysis
-      const tempTrade = {
-        ...validatedTrade,
-        id: 0,
-        created_at: new Date(),
-      };
+      // Check if AI analysis is enabled
+      const aiEnabled = await storage.getSetting("ai_analysis_enabled");
+      let finalTradeData = validatedTrade;
       
-      const analysis = await generateTradeAnalysis(tempTrade as any);
-      const finalTradeData = {
-        ...validatedTrade,
-        ai_summary: analysis.summary,
-        ai_execution: analysis.execution,
-        ai_mistake: analysis.mistake,
-        ai_improvement: analysis.improvement,
-        ai_generated: true,
-      };
+      if (aiEnabled !== "false") {
+        try {
+          const tempTrade = {
+            ...validatedTrade,
+            id: 0,
+            created_at: new Date(),
+          };
+          
+          const analysis = await generateTradeAnalysis(tempTrade as any);
+          finalTradeData = {
+            ...validatedTrade,
+            ai_summary: analysis.summary,
+            ai_execution: analysis.execution,
+            ai_mistake: analysis.mistake,
+            ai_improvement: analysis.improvement,
+            ai_generated: true,
+          };
+        } catch (aiError) {
+          console.error("AI analysis failed, saving trade without AI:", aiError);
+          finalTradeData = {
+            ...validatedTrade,
+            ai_generated: false,
+          };
+        }
+      } else {
+        finalTradeData = {
+          ...validatedTrade,
+          ai_generated: false,
+        };
+      }
       
       const newTrade = await storage.createTrade(finalTradeData);
       res.status(201).json(newTrade);
@@ -97,23 +115,38 @@ export async function registerRoutes(
         });
       }
       
-      // Generate AI analysis if not provided
+      // Check if AI analysis is enabled
+      const aiEnabled = await storage.getSetting("ai_analysis_enabled");
       let tradeData = validatedTrade;
-      if (!validatedTrade.ai_summary) {
-        const tempTrade = {
-          ...validatedTrade,
-          id: 0,
-          created_at: new Date(),
-        };
-        
-        const analysis = await generateTradeAnalysis(tempTrade as any);
+      
+      if (aiEnabled !== "false" && !validatedTrade.ai_summary) {
+        try {
+          const tempTrade = {
+            ...validatedTrade,
+            id: 0,
+            created_at: new Date(),
+          };
+          
+          const analysis = await generateTradeAnalysis(tempTrade as any);
+          tradeData = {
+            ...validatedTrade,
+            ai_summary: analysis.summary,
+            ai_execution: analysis.execution,
+            ai_mistake: analysis.mistake,
+            ai_improvement: analysis.improvement,
+            ai_generated: true,
+          };
+        } catch (aiError) {
+          console.error("AI analysis failed, saving trade without AI:", aiError);
+          tradeData = {
+            ...validatedTrade,
+            ai_generated: false,
+          };
+        }
+      } else if (!validatedTrade.ai_summary) {
         tradeData = {
           ...validatedTrade,
-          ai_summary: analysis.summary,
-          ai_execution: analysis.execution,
-          ai_mistake: analysis.mistake,
-          ai_improvement: analysis.improvement,
-          ai_generated: true,
+          ai_generated: false,
         };
       }
       
@@ -264,6 +297,38 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error regenerating key:", error);
       res.status(500).json({ error: "Failed to regenerate key" });
+    }
+  });
+
+  // ==================== APP SETTINGS ====================
+  
+  // GET /api/settings/:key - Get a setting value
+  app.get("/api/settings/:key", async (req, res) => {
+    try {
+      const { key } = req.params;
+      const value = await storage.getSetting(key);
+      res.json({ key, value: value ?? null });
+    } catch (error) {
+      console.error("Error fetching setting:", error);
+      res.status(500).json({ error: "Failed to fetch setting" });
+    }
+  });
+
+  // PUT /api/settings/:key - Set a setting value
+  app.put("/api/settings/:key", async (req, res) => {
+    try {
+      const { key } = req.params;
+      const { value } = req.body;
+      
+      if (typeof value !== "string") {
+        return res.status(400).json({ error: "Value must be a string" });
+      }
+      
+      await storage.setSetting(key, value);
+      res.json({ key, value });
+    } catch (error) {
+      console.error("Error saving setting:", error);
+      res.status(500).json({ error: "Failed to save setting" });
     }
   });
 
