@@ -15,6 +15,19 @@ export const appSettings = pgTable("app_settings", {
   value: text("value").notNull(),
 });
 
+export const weeklyInsights = pgTable("weekly_insights", {
+  id: serial("id").primaryKey(),
+  week_start: timestamp("week_start", { withTimezone: true }).notNull(),
+  week_end: timestamp("week_end", { withTimezone: true }).notNull(),
+  top_strength: text("top_strength"),
+  main_leak: text("main_leak"),
+  action_item: text("action_item"),
+  trades_analyzed: real("trades_analyzed").default(0),
+  total_pnl: real("total_pnl").default(0),
+  win_rate: real("win_rate").default(0),
+  generated_at: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const mt5Accounts = pgTable("mt5_accounts", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
@@ -110,3 +123,4 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertMT5Account = z.infer<typeof insertMT5AccountSchema>;
 export type MT5Account = typeof mt5Accounts.$inferSelect;
+export type WeeklyInsight = typeof weeklyInsights.$inferSelect;

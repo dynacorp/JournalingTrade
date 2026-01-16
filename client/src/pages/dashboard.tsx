@@ -3,13 +3,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EquityChart } from "@/components/equity-chart";
 import { useTrades } from "@/hooks/use-trades";
 import { useMT5Accounts } from "@/hooks/use-mt5-accounts";
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles, Loader2, Wallet } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles, Loader2, Wallet, Calendar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { format } from "date-fns";
 
 export default function Dashboard() {
   const { data: trades = [], isLoading: isLoadingTrades } = useTrades();
   const { data: accounts = [], isLoading: isLoadingAccounts } = useMT5Accounts();
+  
+  const { data: weeklyInsight, isLoading: isLoadingInsight } = useQuery({
+    queryKey: ["weekly-insight"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/weekly-insight");
+      return res.json();
+    },
+  });
 
   const isLoading = isLoadingTrades || isLoadingAccounts;
 
@@ -154,26 +165,48 @@ export default function Dashboard() {
         {/* AI Insight Section */}
         <Card className="bg-gradient-to-br from-sidebar to-card border-border">
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary" />
-              <CardTitle>Weekly AI Insight</CardTitle>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary" />
+                <CardTitle>Weekly AI Insight</CardTitle>
+              </div>
+              {weeklyInsight?.week_start && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Calendar className="w-3 h-3" />
+                  <span>
+                    {format(new Date(weeklyInsight.week_start), "MMM d")} - {format(new Date(weeklyInsight.week_end), "MMM d, yyyy")}
+                  </span>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Top Strength</h4>
-                <p className="text-sm">You are executing trend continuations on <span className="text-foreground font-mono font-bold">EURUSD</span> with high accuracy (85%).</p>
+            {isLoadingInsight ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
               </div>
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Main Leak</h4>
-                <p className="text-sm">Counter-trend trades during the Asian session are accounting for <span className="text-destructive font-bold">60%</span> of your losses.</p>
+            ) : weeklyInsight ? (
+              <div className="grid md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Top Strength</h4>
+                  <p className="text-sm" data-testid="text-top-strength">{weeklyInsight.top_strength}</p>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Main Leak</h4>
+                  <p className="text-sm" data-testid="text-main-leak">{weeklyInsight.main_leak}</p>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Action Item</h4>
+                  <p className="text-sm" data-testid="text-action-item">{weeklyInsight.action_item}</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Action Item</h4>
-                <p className="text-sm">Consider filtering out reversal setups between 22:00 - 06:00 UTC.</p>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Weekly insights are generated on Sundays.</p>
+                <p className="text-xs">Complete some trades to see your personalized analysis.</p>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>

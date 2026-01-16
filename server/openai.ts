@@ -11,6 +11,12 @@ interface TradeAnalysis {
   improvement: string | null;
 }
 
+export interface WeeklyAnalysis {
+  top_strength: string;
+  main_leak: string;
+  action_item: string;
+}
+
 export async function generateTradeAnalysis(trade: Trade): Promise<TradeAnalysis> {
   try {
     const maePercent = trade.risk ? (trade.mae / trade.risk) * 100 : null;
@@ -74,6 +80,91 @@ Execution rating criteria:
       execution: "Neutral",
       mistake: null,
       improvement: null,
+    };
+  }
+}
+
+export async function generateWeeklyAnalysis(trades: Trade[]): Promise<WeeklyAnalysis> {
+  try {
+    if (trades.length === 0) {
+      return {
+        top_strength: "No trades to analyze this week.",
+        main_leak: "Start trading to get insights.",
+        action_item: "Focus on following your trading plan.",
+      };
+    }
+
+    const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
+    const wins = trades.filter(t => t.net_pnl > 0);
+    const losses = trades.filter(t => t.net_pnl < 0);
+    const winRate = (wins.length / trades.length * 100).toFixed(1);
+    
+    const symbolStats = trades.reduce((acc, t) => {
+      if (!acc[t.symbol]) acc[t.symbol] = { wins: 0, losses: 0, pnl: 0 };
+      acc[t.symbol].pnl += t.net_pnl;
+      if (t.net_pnl > 0) acc[t.symbol].wins++;
+      else acc[t.symbol].losses++;
+      return acc;
+    }, {} as Record<string, { wins: number; losses: number; pnl: number }>);
+
+    const avgMaePercent = trades
+      .filter(t => t.risk && t.risk > 0)
+      .reduce((sum, t) => sum + (t.mae / t.risk!) * 100, 0) / Math.max(1, trades.filter(t => t.risk).length);
+
+    const prompt = `Analyze this week's trading performance:
+
+Total Trades: ${trades.length}
+Win Rate: ${winRate}%
+Net P&L: $${totalPnl.toFixed(2)}
+Wins: ${wins.length}, Losses: ${losses.length}
+
+Symbol Performance:
+${Object.entries(symbolStats).map(([symbol, stats]) => 
+  `- ${symbol}: ${stats.wins}W/${stats.losses}L, P&L: $${stats.pnl.toFixed(2)}`
+).join("\n")}
+
+Average MAE (entry quality): ${avgMaePercent.toFixed(1)}% of risk
+
+Biggest Win: $${Math.max(...trades.map(t => t.net_pnl)).toFixed(2)}
+Biggest Loss: $${Math.min(...trades.map(t => t.net_pnl)).toFixed(2)}
+
+Provide a JSON response with:
+{
+  "top_strength": "One specific strength the trader showed this week (be specific with symbols/setups)",
+  "main_leak": "One specific weakness or pattern causing losses (be specific)",
+  "action_item": "One concrete, actionable improvement for next week"
+}
+
+Keep each response to 1-2 sentences, be specific and actionable.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-5",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert trading coach providing weekly performance reviews. Be specific, data-driven, and actionable."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(response.choices[0].message.content || "{}");
+
+    return {
+      top_strength: result.top_strength || "Analysis unavailable",
+      main_leak: result.main_leak || "Analysis unavailable",
+      action_item: result.action_item || "Analysis unavailable",
+    };
+  } catch (error) {
+    console.error("Failed to generate weekly analysis:", error);
+    return {
+      top_strength: "Weekly analysis unavailable",
+      main_leak: "Please try again later",
+      action_item: "Check your OpenAI API key settings",
     };
   }
 }

@@ -2,8 +2,9 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertTradeSchema, insertMT5AccountSchema } from "@shared/schema";
-import { generateTradeAnalysis } from "./openai";
+import { generateTradeAnalysis, generateWeeklyAnalysis } from "./openai";
 import { fromZodError } from "zod-validation-error";
+import { startOfWeek, endOfWeek, subWeeks, isSunday } from "date-fns";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -264,6 +265,124 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error regenerating key:", error);
       res.status(500).json({ error: "Failed to regenerate key" });
+    }
+  });
+
+  // ==================== WEEKLY INSIGHTS ====================
+  
+  // GET /api/weekly-insight - Get the latest weekly insight (generates on Sunday if needed)
+  app.get("/api/weekly-insight", async (req, res) => {
+    try {
+      const now = new Date();
+      const today = isSunday(now);
+      
+      // Week runs Sunday to Saturday
+      // Get the start of the current week (Sunday)
+      const currentWeekStart = startOfWeek(now, { weekStartsOn: 0 });
+      const currentWeekEnd = endOfWeek(now, { weekStartsOn: 0 });
+      
+      // For analysis, we analyze the PREVIOUS week (last Sunday to last Saturday)
+      const previousWeekStart = subWeeks(currentWeekStart, 1);
+      const previousWeekEnd = subWeeks(currentWeekEnd, 1);
+      
+      // Check if we have an insight for the previous week
+      let insight = await storage.getWeeklyInsight(previousWeekStart);
+      
+      // If it's Sunday and we don't have an insight for last week, generate one
+      if (!insight && today) {
+        const aiEnabled = await storage.getSetting("ai_analysis_enabled");
+        
+        if (aiEnabled !== "false") {
+          try {
+            const trades = await storage.getTradesByDateRange(previousWeekStart, previousWeekEnd);
+            const analysis = await generateWeeklyAnalysis(trades);
+            
+            const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
+            const winRate = trades.length > 0 
+              ? (trades.filter(t => t.net_pnl > 0).length / trades.length) * 100 
+              : 0;
+            
+            insight = await storage.createWeeklyInsight({
+              week_start: previousWeekStart,
+              week_end: previousWeekEnd,
+              top_strength: analysis.top_strength,
+              main_leak: analysis.main_leak,
+              action_item: analysis.action_item,
+              trades_analyzed: trades.length,
+              total_pnl: totalPnl,
+              win_rate: winRate,
+            });
+          } catch (error) {
+            console.error("Failed to generate weekly insight:", error);
+          }
+        }
+      }
+      
+      // If still no insight, get the latest one we have
+      if (!insight) {
+        insight = await storage.getLatestWeeklyInsight();
+      }
+      
+      res.json(insight || null);
+    } catch (error) {
+      console.error("Error fetching weekly insight:", error);
+      res.status(500).json({ error: "Failed to fetch weekly insight" });
+    }
+  });
+
+  // POST /api/weekly-insight/generate - Force generate weekly insight (only works on Sundays)
+  app.post("/api/weekly-insight/generate", async (req, res) => {
+    try {
+      const now = new Date();
+      
+      // Enforce Sunday-only generation
+      if (!isSunday(now)) {
+        return res.status(403).json({ 
+          error: "Weekly insights can only be generated on Sundays",
+          next_sunday: startOfWeek(now, { weekStartsOn: 0 }).toISOString()
+        });
+      }
+      
+      const aiEnabled = await storage.getSetting("ai_analysis_enabled");
+      
+      if (aiEnabled === "false") {
+        return res.status(400).json({ error: "AI analysis is disabled" });
+      }
+      
+      const currentWeekStart = startOfWeek(now, { weekStartsOn: 0 });
+      const currentWeekEnd = endOfWeek(now, { weekStartsOn: 0 });
+      const previousWeekStart = subWeeks(currentWeekStart, 1);
+      const previousWeekEnd = subWeeks(currentWeekEnd, 1);
+      
+      // Check if already exists
+      const existing = await storage.getWeeklyInsight(previousWeekStart);
+      if (existing) {
+        return res.json(existing);
+      }
+      
+      const trades = await storage.getTradesByDateRange(previousWeekStart, previousWeekEnd);
+      const analysis = await generateWeeklyAnalysis(trades);
+      
+      const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
+      const winRate = trades.length > 0 
+        ? (trades.filter(t => t.net_pnl > 0).length / trades.length) * 100 
+        : 0;
+      
+      const insight = await storage.createWeeklyInsight({
+        week_start: previousWeekStart,
+        week_end: previousWeekEnd,
+        top_strength: analysis.top_strength,
+        main_leak: analysis.main_leak,
+        action_item: analysis.action_item,
+        trades_analyzed: trades.length,
+        total_pnl: totalPnl,
+        win_rate: winRate,
+      });
+      
+      res.status(201).json(insight);
+    } catch (error) {
+      console.error("Error generating weekly insight:", error);
+      res.status(500).json({ error: "Failed to generate weekly insight" });
     }
   });
 

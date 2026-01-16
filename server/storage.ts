@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, users, trades, mt5Accounts, appSettings } from "@shared/schema";
+import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, type WeeklyInsight, users, trades, mt5Accounts, appSettings, weeklyInsights } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -29,6 +29,11 @@ export interface IStorage {
   // App Settings operations
   getSetting(key: string): Promise<string | undefined>;
   setSetting(key: string, value: string): Promise<void>;
+  
+  // Weekly Insights operations
+  getWeeklyInsight(weekStart: Date): Promise<WeeklyInsight | undefined>;
+  getLatestWeeklyInsight(): Promise<WeeklyInsight | undefined>;
+  createWeeklyInsight(insight: Omit<WeeklyInsight, "id" | "generated_at">): Promise<WeeklyInsight>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -190,6 +195,30 @@ export class DatabaseStorage implements IStorage {
     } else {
       await db.insert(appSettings).values({ key, value });
     }
+  }
+
+  // Weekly Insights operations
+  async getWeeklyInsight(weekStart: Date): Promise<WeeklyInsight | undefined> {
+    const result = await db
+      .select()
+      .from(weeklyInsights)
+      .where(eq(weeklyInsights.week_start, weekStart))
+      .limit(1);
+    return result[0];
+  }
+
+  async getLatestWeeklyInsight(): Promise<WeeklyInsight | undefined> {
+    const result = await db
+      .select()
+      .from(weeklyInsights)
+      .orderBy(desc(weeklyInsights.week_start))
+      .limit(1);
+    return result[0];
+  }
+
+  async createWeeklyInsight(insight: Omit<WeeklyInsight, "id" | "generated_at">): Promise<WeeklyInsight> {
+    const result = await db.insert(weeklyInsights).values(insight).returning();
+    return result[0];
   }
 }
 
