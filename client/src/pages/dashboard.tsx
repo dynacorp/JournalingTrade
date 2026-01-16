@@ -14,9 +14,17 @@ export default function Dashboard() {
   const isLoading = isLoadingTrades || isLoadingAccounts;
 
   const stats = useMemo(() => {
-    const totalInitialBalance = accounts.reduce((sum, acc) => sum + (acc.initial_balance || 0), 0);
     const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
-    const currentBalance = totalInitialBalance + totalPnl;
+    
+    // Get latest balance/equity from most recent trade, or fall back to initial balance
+    const sortedTrades = [...trades].sort((a, b) => 
+      new Date(b.close_time).getTime() - new Date(a.close_time).getTime()
+    );
+    const latestTrade = sortedTrades[0];
+    const totalInitialBalance = accounts.reduce((sum, acc) => sum + (acc.initial_balance || 0), 0);
+    
+    const currentBalance = latestTrade?.balance ?? totalInitialBalance;
+    const currentEquity = latestTrade?.equity ?? currentBalance;
 
     if (!trades.length) {
       return [
@@ -33,16 +41,12 @@ export default function Dashboard() {
     const grossProfit = trades.filter(t => t.net_pnl > 0).reduce((sum, t) => sum + t.net_pnl, 0);
     const grossLoss = Math.abs(trades.filter(t => t.net_pnl < 0).reduce((sum, t) => sum + t.net_pnl, 0));
     const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss).toFixed(1) : "∞";
-    
-    const avgR = trades
-      .filter(t => t.risk && t.risk_cash)
-      .reduce((sum, t) => sum + (t.net_pnl / (t.risk_cash || 1)), 0) / Math.max(1, trades.filter(t => t.risk).length);
 
     return [
       {
         label: "Account Balance",
         value: `$${currentBalance.toFixed(2)}`,
-        subtext: `Equity: $${currentBalance.toFixed(2)}`,
+        subtext: `Equity: $${currentEquity.toFixed(2)}`,
         icon: Wallet,
         trend: totalPnl >= 0 ? "up" : "down"
       },

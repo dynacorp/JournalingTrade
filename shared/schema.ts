@@ -48,6 +48,10 @@ export const trades = pgTable("trades", {
   swap: real("swap").notNull().default(0),
   net_pnl: real("net_pnl").notNull(),
   
+  // Account State (snapshot at trade close)
+  balance: real("balance"),
+  equity: real("equity"),
+  
   // Risk & Drawdown (MAE/MFE)
   mae: real("mae").notNull(), // Maximum Adverse Excursion (points)
   mae_cash: real("mae_cash").notNull(), // MAE in cash
