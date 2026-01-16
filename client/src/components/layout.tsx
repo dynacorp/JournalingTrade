@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Calendar, LineChart, Settings, BookOpen, Menu } from "lucide-react";
+import { LayoutDashboard, Calendar, Settings, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,6 @@ import { useIsMobile } from "@/hooks/use-mobile";
 const NAV_ITEMS = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Journal", icon: Calendar, href: "/journal" },
-  { label: "Analysis", icon: LineChart, href: "/analysis" },
-  { label: "Learning", icon: BookOpen, href: "/learning" },
   { label: "Settings", icon: Settings, href: "/settings" },
 ];
 
