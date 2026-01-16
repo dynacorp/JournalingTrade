@@ -2,24 +2,31 @@ import { Layout } from "@/components/layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EquityChart } from "@/components/equity-chart";
 import { useTrades } from "@/hooks/use-trades";
-import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles, Loader2 } from "lucide-react";
+import { useMT5Accounts } from "@/hooks/use-mt5-accounts";
+import { ArrowUpRight, ArrowDownRight, TrendingUp, Activity, DollarSign, BarChart3, Sparkles, Loader2, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useMemo } from "react";
 
 export default function Dashboard() {
-  const { data: trades = [], isLoading } = useTrades();
+  const { data: trades = [], isLoading: isLoadingTrades } = useTrades();
+  const { data: accounts = [], isLoading: isLoadingAccounts } = useMT5Accounts();
+
+  const isLoading = isLoadingTrades || isLoadingAccounts;
 
   const stats = useMemo(() => {
+    const totalInitialBalance = accounts.reduce((sum, acc) => sum + (acc.initial_balance || 0), 0);
+    const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
+    const currentBalance = totalInitialBalance + totalPnl;
+
     if (!trades.length) {
       return [
+        { label: "Account Balance", value: `$${totalInitialBalance.toFixed(2)}`, subtext: "Starting balance", icon: Wallet, trend: "neutral" },
         { label: "Net Profit", value: "$0.00", subtext: "No trades yet", icon: DollarSign, trend: "neutral" },
         { label: "Win Rate", value: "0%", subtext: "No trades yet", icon: Activity, trend: "neutral" },
-        { label: "Profit Factor", value: "0.0", subtext: "Gross Profit / Gross Loss", icon: TrendingUp, trend: "neutral" },
-        { label: "Avg R-Multiple", value: "0.0R", subtext: "Risk Reward Ratio", icon: BarChart3, trend: "neutral" }
+        { label: "Profit Factor", value: "0.0", subtext: "Gross Profit / Gross Loss", icon: TrendingUp, trend: "neutral" }
       ];
     }
 
-    const totalPnl = trades.reduce((sum, t) => sum + t.net_pnl, 0);
     const wins = trades.filter(t => t.net_pnl > 0).length;
     const winRate = ((wins / trades.length) * 100).toFixed(0);
     
@@ -32,6 +39,13 @@ export default function Dashboard() {
       .reduce((sum, t) => sum + (t.net_pnl / (t.risk_cash || 1)), 0) / Math.max(1, trades.filter(t => t.risk).length);
 
     return [
+      {
+        label: "Account Balance",
+        value: `$${currentBalance.toFixed(2)}`,
+        subtext: `Equity: $${currentBalance.toFixed(2)}`,
+        icon: Wallet,
+        trend: totalPnl >= 0 ? "up" : "down"
+      },
       {
         label: "Net Profit",
         value: totalPnl >= 0 ? `+$${totalPnl.toFixed(2)}` : `-$${Math.abs(totalPnl).toFixed(2)}`,
@@ -52,16 +66,9 @@ export default function Dashboard() {
         subtext: "Gross Profit / Gross Loss",
         icon: TrendingUp,
         trend: parseFloat(profitFactor) > 1 ? "up" : "down"
-      },
-      {
-        label: "Avg R-Multiple",
-        value: `${avgR.toFixed(1)}R`,
-        subtext: "Risk Reward Ratio",
-        icon: BarChart3,
-        trend: avgR > 1 ? "up" : "down"
       }
     ];
-  }, [trades]);
+  }, [trades, accounts]);
 
   if (isLoading) {
     return (

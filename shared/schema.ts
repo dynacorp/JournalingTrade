@@ -14,6 +14,7 @@ export const mt5Accounts = pgTable("mt5_accounts", {
   name: varchar("name", { length: 100 }).notNull(),
   account_id: varchar("account_id", { length: 100 }).notNull(),
   broker: varchar("broker", { length: 100 }).notNull(),
+  initial_balance: real("initial_balance").notNull().default(0),
   ingestion_key: varchar("ingestion_key", { length: 64 }).notNull().unique(),
   is_active: boolean("is_active").default(true).notNull(),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

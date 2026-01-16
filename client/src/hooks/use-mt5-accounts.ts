@@ -6,6 +6,7 @@ interface CreateMT5AccountInput {
   name: string;
   account_id: string;
   broker: string;
+  initial_balance: number;
   is_active?: boolean;
 }
 
