@@ -50,40 +50,11 @@ export async function registerRoutes(
         });
       }
       
-      // Check if AI analysis is enabled
-      const aiEnabled = await storage.getSetting("ai_analysis_enabled");
-      let finalTradeData = validatedTrade;
-      
-      if (aiEnabled !== "false") {
-        try {
-          const tempTrade = {
-            ...validatedTrade,
-            id: 0,
-            created_at: new Date(),
-          };
-          
-          const analysis = await generateTradeAnalysis(tempTrade as any);
-          finalTradeData = {
-            ...validatedTrade,
-            ai_summary: analysis.summary,
-            ai_execution: analysis.execution,
-            ai_mistake: analysis.mistake,
-            ai_improvement: analysis.improvement,
-            ai_generated: true,
-          };
-        } catch (aiError) {
-          console.error("AI analysis failed, saving trade without AI:", aiError);
-          finalTradeData = {
-            ...validatedTrade,
-            ai_generated: false,
-          };
-        }
-      } else {
-        finalTradeData = {
-          ...validatedTrade,
-          ai_generated: false,
-        };
-      }
+      // Save trade without AI analysis - AI will be generated on-demand when viewing the trade
+      const finalTradeData = {
+        ...validatedTrade,
+        ai_generated: false,
+      };
       
       const newTrade = await storage.createTrade(finalTradeData);
       res.status(201).json(newTrade);
@@ -115,40 +86,11 @@ export async function registerRoutes(
         });
       }
       
-      // Check if AI analysis is enabled
-      const aiEnabled = await storage.getSetting("ai_analysis_enabled");
-      let tradeData = validatedTrade;
-      
-      if (aiEnabled !== "false" && !validatedTrade.ai_summary) {
-        try {
-          const tempTrade = {
-            ...validatedTrade,
-            id: 0,
-            created_at: new Date(),
-          };
-          
-          const analysis = await generateTradeAnalysis(tempTrade as any);
-          tradeData = {
-            ...validatedTrade,
-            ai_summary: analysis.summary,
-            ai_execution: analysis.execution,
-            ai_mistake: analysis.mistake,
-            ai_improvement: analysis.improvement,
-            ai_generated: true,
-          };
-        } catch (aiError) {
-          console.error("AI analysis failed, saving trade without AI:", aiError);
-          tradeData = {
-            ...validatedTrade,
-            ai_generated: false,
-          };
-        }
-      } else if (!validatedTrade.ai_summary) {
-        tradeData = {
-          ...validatedTrade,
-          ai_generated: false,
-        };
-      }
+      // Save trade without AI analysis - AI will be generated on-demand when viewing the trade
+      const tradeData = {
+        ...validatedTrade,
+        ai_generated: false,
+      };
       
       const newTrade = await storage.createTrade(tradeData);
       res.status(201).json(newTrade);
@@ -187,14 +129,39 @@ export async function registerRoutes(
     }
   });
   
-  // GET /api/trades/:id - Get single trade
+  // GET /api/trades/:id - Get single trade (generates AI analysis on first view if enabled)
   app.get("/api/trades/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const trade = await storage.getTrade(id);
+      let trade = await storage.getTrade(id);
       
       if (!trade) {
         return res.status(404).json({ error: "Trade not found" });
+      }
+      
+      // Generate AI analysis on-demand if not already generated and AI is enabled
+      if (!trade.ai_generated && !trade.ai_summary) {
+        const aiEnabled = await storage.getSetting("ai_analysis_enabled");
+        
+        if (aiEnabled !== "false") {
+          try {
+            const analysis = await generateTradeAnalysis(trade);
+            const updatedTrade = await storage.updateTrade(id, {
+              ai_summary: analysis.summary,
+              ai_execution: analysis.execution,
+              ai_mistake: analysis.mistake,
+              ai_improvement: analysis.improvement,
+              ai_generated: true,
+            } as any);
+            
+            if (updatedTrade) {
+              trade = updatedTrade;
+            }
+          } catch (aiError) {
+            console.error("AI analysis failed, will retry on next view:", aiError);
+            // Don't mark as generated - will retry on next view
+          }
+        }
       }
       
       res.json(trade);
