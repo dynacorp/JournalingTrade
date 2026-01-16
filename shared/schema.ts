@@ -79,7 +79,10 @@ export const tradeUniqueConstraint = sql`
   CREATE UNIQUE INDEX IF NOT EXISTS unique_trade_deal ON trades(deal_id, account_id);
 `;
 
-export const insertTradeSchema = createInsertSchema(trades).omit({
+export const insertTradeSchema = createInsertSchema(trades, {
+  open_time: z.string().datetime(),
+  close_time: z.string().datetime(),
+}).omit({
   id: true,
   created_at: true,
 });
