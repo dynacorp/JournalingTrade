@@ -75,6 +75,8 @@ export const trades = pgTable("trades", {
   mae: real("mae").notNull(), // Maximum Adverse Excursion (points)
   mae_cash: real("mae_cash").notNull(), // MAE in cash
   mfe: real("mfe").notNull(), // Maximum Favorable Excursion (points)
+  mfe_cash: real("mfe_cash"), // MFE in cash
+  dd_pct: real("dd_pct"), // Drawdown percentage
   risk: real("risk"), // Planned Stop Loss distance (points) - Nullable
   risk_cash: real("risk_cash"), // Planned Stop Loss value (cash) - Nullable
   
