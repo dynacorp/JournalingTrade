@@ -176,7 +176,9 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                             "min-h-[100px] p-2 relative group cursor-pointer transition-all border-r border-border hover:bg-accent/30",
                             !isCurrentMonth && "bg-muted/10 opacity-60",
                             isSelected && "bg-accent/40 inset-shadow-sm ring-1 ring-inset ring-primary",
-                            isTodayDate && "bg-accent/20"
+                            isTodayDate && !hasTrades && "bg-accent/20",
+                            hasTrades && isPositive && "bg-green-500/15",
+                            hasTrades && !isPositive && "bg-red-500/15"
                           )}
                         >
                           <div className="flex justify-between items-start mb-2">
