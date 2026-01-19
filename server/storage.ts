@@ -101,19 +101,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTrade(trade: InsertTrade): Promise<Trade> {
+    const parseDate = (val: string | null | undefined): Date | null => {
+      if (!val || val === "") return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    
     const tradeWithDates = {
       ...trade,
-      open_time: new Date(trade.open_time),
-      close_time: new Date(trade.close_time),
+      open_time: parseDate(trade.open_time),
+      close_time: parseDate(trade.close_time),
     };
     const result = await db.insert(trades).values(tradeWithDates).returning();
     return result[0];
   }
 
   async updateTrade(id: number, updates: Partial<InsertTrade>): Promise<Trade | undefined> {
+    const parseDate = (val: string | null | undefined): Date | null | undefined => {
+      if (val === undefined) return undefined;
+      if (!val || val === "") return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    
     const updatesWithDates: any = { ...updates };
-    if (updates.open_time) updatesWithDates.open_time = new Date(updates.open_time);
-    if (updates.close_time) updatesWithDates.close_time = new Date(updates.close_time);
+    if (updates.open_time !== undefined) updatesWithDates.open_time = parseDate(updates.open_time);
+    if (updates.close_time !== undefined) updatesWithDates.close_time = parseDate(updates.close_time);
     
     const result = await db
       .update(trades)

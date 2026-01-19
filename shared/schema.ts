@@ -58,8 +58,8 @@ export const trades = pgTable("trades", {
   tp_price: real("tp_price"),
   
   // Times
-  open_time: timestamp("open_time", { withTimezone: true }).notNull(),
-  close_time: timestamp("close_time", { withTimezone: true }).notNull(),
+  open_time: timestamp("open_time", { withTimezone: true }),
+  close_time: timestamp("close_time", { withTimezone: true }),
   
   // P&L
   pnl: real("pnl").notNull(),
@@ -99,8 +99,8 @@ export const tradeUniqueConstraint = sql`
 `;
 
 export const insertTradeSchema = createInsertSchema(trades, {
-  open_time: z.string().datetime(),
-  close_time: z.string().datetime(),
+  open_time: z.string().optional().nullable(),
+  close_time: z.string().optional().nullable(),
 }).omit({
   id: true,
   created_at: true,
