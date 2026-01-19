@@ -226,11 +226,11 @@ export function TradeDetail({ trade, isOpen, onClose }: TradeDetailProps) {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Open Time</span>
-                  <span className="font-mono">{format(new Date(trade.open_time), "MMM d, HH:mm:ss")}</span>
+                  <span className="font-mono">{trade.open_time ? format(new Date(trade.open_time), "MMM d, HH:mm:ss") : "No open time"}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Close Time</span>
-                  <span className="font-mono">{format(new Date(trade.close_time), "MMM d, HH:mm:ss")}</span>
+                  <span className="font-mono">{trade.close_time ? format(new Date(trade.close_time), "MMM d, HH:mm:ss") : "No close time"}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-border border-dashed">
                   <span className="text-muted-foreground">Commission</span>
