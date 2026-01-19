@@ -210,7 +210,12 @@ export function CalendarPnL({ trades, onSelectDate, selectedDate, onSelectTrade 
                     })}
 
                     {/* Weekly Total Column */}
-                    <div className="bg-muted/10 p-2 flex flex-col justify-center gap-1 border-l border-border/50">
+                    <div className={cn(
+                      "p-2 flex flex-col justify-center gap-1 border-l border-border/50",
+                      weekTrades > 0 && weekPnL > 0 && "bg-green-500/15",
+                      weekTrades > 0 && weekPnL <= 0 && "bg-red-500/15",
+                      weekTrades === 0 && "bg-muted/10"
+                    )}>
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                         Week {i + 1}
                       </span>
