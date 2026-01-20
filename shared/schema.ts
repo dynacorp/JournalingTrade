@@ -47,7 +47,7 @@ export const trades = pgTable("trades", {
   account_id: varchar("account_id", { length: 100 }).notNull(),
   
   // Trade Info
-  symbol: varchar("symbol", { length: 20 }).notNull(),
+  symbol: varchar("symbol", { length: 50 }).notNull(),
   side: varchar("side", { length: 10 }).notNull(), // BUY or SELL
   volume: real("volume").notNull(),
   
@@ -134,7 +134,7 @@ export const chartSnapshots = pgTable("chart_snapshots", {
   account_id: varchar("account_id", { length: 100 }).notNull(),
 
   // Chart Context
-  symbol: varchar("symbol", { length: 20 }).notNull(),
+  symbol: varchar("symbol", { length: 50 }).notNull(),
   timeframe: varchar("timeframe", { length: 10 }).notNull(),
   snapshot_time: timestamp("snapshot_time", { withTimezone: true }).notNull(),
 
@@ -275,7 +275,7 @@ export const insertChartSnapshotSchema = createInsertSchema(chartSnapshots, {
 
 export const ingestChartSnapshotSchema = z.object({
   snapshot_id: z.string().min(1).max(64),
-  symbol: z.string().min(1).max(20),
+  symbol: z.string().min(1).max(50),
   timeframe: z.string().min(1).max(10),
   snapshot_time: z.string(),
   image_data: z.string().min(1),
