@@ -422,6 +422,7 @@ export async function registerRoutes(
   // ==================== CHART SNAPSHOTS ====================
 
   // POST /api/chart-snapshots/ingest - EA sends chart screenshot (requires ingestion_key)
+  // Uses upsert logic: HTF keeps candle history, LTF keeps only latest per symbol/timeframe
   app.post("/api/chart-snapshots/ingest", async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
@@ -438,32 +439,46 @@ export async function registerRoutes(
 
       const validated = ingestChartSnapshotSchema.parse(req.body);
 
-      // Check for duplicate snapshot
-      const existing = await storage.getChartSnapshotBySnapshotId(validated.snapshot_id);
-      if (existing) {
-        return res.status(409).json({
-          error: "Snapshot already exists",
-          snapshot: { id: existing.id, status: existing.status }
+      // Determine if this is HTF (H1 and above) or LTF
+      const htfTimeframes = ["H1", "H2", "H3", "H4", "H6", "H8", "H12", "D1", "W1", "MN1"];
+      const isHTF = htfTimeframes.includes(validated.timeframe);
+
+      // Parse candle_time if provided
+      const candleTime = validated.candle_time ? new Date(validated.candle_time) : undefined;
+
+      // Use upsert logic:
+      // - HTF: keeps each candle's snapshot (updates if same candle_time exists)
+      // - LTF: keeps only the latest snapshot per symbol/timeframe (replaces pending ones)
+      const snapshot = await storage.upsertChartSnapshot(
+        {
+          ...validated,
+          account_id: mt5Account.account_id,
+          status: "pending",
+          candle_time: candleTime,
+        },
+        isHTF
+      );
+
+      // Process snapshot asynchronously (pre-analysis + optional auto full analysis)
+      // Only run if status is pending (new or reset)
+      if (snapshot.status === "pending") {
+        processSnapshot(snapshot.id).catch(err => {
+          console.error("Background snapshot processing failed:", err);
         });
       }
 
-      // Create snapshot
-      const snapshot = await storage.createChartSnapshot({
-        ...validated,
-        account_id: mt5Account.account_id,
-        status: "pending",
-      });
+      // Periodically cleanup old LTF snapshots (1% chance per request to avoid overhead)
+      if (Math.random() < 0.01) {
+        storage.cleanupOldLTFSnapshots(24).catch(err => {
+          console.error("LTF cleanup failed:", err);
+        });
+      }
 
-      // Process snapshot asynchronously (pre-analysis + optional auto full analysis)
-      processSnapshot(snapshot.id).catch(err => {
-        console.error("Background snapshot processing failed:", err);
-      });
-
-      res.status(201).json({
+      res.status(snapshot.status === "pending" ? 201 : 200).json({
         id: snapshot.id,
         snapshot_id: snapshot.snapshot_id,
-        status: "pending",
-        message: "Snapshot received, analysis queued"
+        status: snapshot.status,
+        message: snapshot.status === "pending" ? "Snapshot received, analysis queued" : "Snapshot updated"
       });
     } catch (error: any) {
       if (error.name === "ZodError") {

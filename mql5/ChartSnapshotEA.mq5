@@ -5,14 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "TradeMind"
 #property link      ""
-#property version   "2.00"
+#property version   "3.00"
 #property strict
 
 //--- Input parameters
 input string   InpServerURL = "http://localhost:3000";     // Server URL
 input string   InpIngestionKey = "";                        // Ingestion Key (from MT5 Account settings)
-input int      InpCaptureIntervalMinutes = 15;              // Capture interval (minutes)
-input bool     InpCaptureOnNewBar = true;                   // Also capture on new bar
 input int      InpImageWidth = 1920;                        // Screenshot width
 input int      InpImageHeight = 1080;                       // Screenshot height
 input bool     InpShowIndicators = true;                    // Include indicators in screenshot
@@ -23,12 +21,15 @@ input string   InpLTFTimeframes = "M5,M15";                 // Lower Timeframes 
 input bool     InpGroupedCapture = true;                    // Capture all TFs together as group
 
 //--- Global variables
-datetime g_lastCaptureTime = 0;
-datetime g_lastBarTime = 0;
 string   g_htfTimeframes[];
 string   g_ltfTimeframes[];
 int      g_htfCount = 0;
 int      g_ltfCount = 0;
+
+// Track last bar time for each monitored timeframe to detect candle close
+datetime g_lastBarTime[];
+string   g_monitoredTFs[];
+int      g_monitoredCount = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                     |
@@ -64,21 +65,31 @@ int OnInit()
       StringTrimRight(g_ltfTimeframes[i]);
    }
 
-   Print("ChartSnapshotEA v2.0 initialized");
+   //--- Build combined list of monitored timeframes
+   g_monitoredCount = g_htfCount + g_ltfCount;
+   ArrayResize(g_monitoredTFs, g_monitoredCount);
+   ArrayResize(g_lastBarTime, g_monitoredCount);
+
+   int idx = 0;
+   for(int i = 0; i < g_htfCount; i++)
+   {
+      g_monitoredTFs[idx] = g_htfTimeframes[i];
+      g_lastBarTime[idx] = 0;
+      idx++;
+   }
+   for(int i = 0; i < g_ltfCount; i++)
+   {
+      g_monitoredTFs[idx] = g_ltfTimeframes[i];
+      g_lastBarTime[idx] = 0;
+      idx++;
+   }
+
+   Print("ChartSnapshotEA v3.0 initialized - Candle Close Mode");
    Print("Server: ", InpServerURL);
-   Print("Capture interval: ", InpCaptureIntervalMinutes, " minutes");
    Print("HTF (bias): ", InpHTFTimeframes);
    Print("LTF (entry): ", InpLTFTimeframes);
    Print("Grouped capture: ", InpGroupedCapture ? "Yes" : "No");
-
-   //--- Set timer for periodic captures
-   if(InpCaptureIntervalMinutes > 0)
-   {
-      EventSetTimer(InpCaptureIntervalMinutes * 60);
-   }
-
-   //--- Initial capture after short delay
-   EventSetMillisecondTimer(5000);
+   Print("Captures only on candle close for each timeframe");
 
    return INIT_SUCCEEDED;
 }
@@ -88,20 +99,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   EventKillTimer();
    Print("ChartSnapshotEA deinitialized");
-}
-
-//+------------------------------------------------------------------+
-//| Timer function                                                     |
-//+------------------------------------------------------------------+
-void OnTimer()
-{
-   //--- Capture on timer interval
-   if(InpGroupedCapture)
-      CaptureGroupedSnapshots("timer");
-   else
-      CaptureCurrentTimeframe("timer");
 }
 
 //+------------------------------------------------------------------+
@@ -109,30 +107,105 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   //--- Check for new bar if enabled
-   if(InpCaptureOnNewBar)
+   //--- Check each monitored timeframe for candle close
+   for(int i = 0; i < g_monitoredCount; i++)
    {
-      datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
-      if(currentBarTime != g_lastBarTime)
-      {
-         g_lastBarTime = currentBarTime;
+      ENUM_TIMEFRAMES tf = StringToTimeframe(g_monitoredTFs[i]);
+      datetime currentBarTime = iTime(_Symbol, tf, 0);
 
-         //--- Only capture if enough time has passed (prevent spam)
-         if(TimeCurrent() - g_lastCaptureTime >= 60)
+      //--- New bar detected = previous candle closed
+      if(currentBarTime != g_lastBarTime[i] && g_lastBarTime[i] != 0)
+      {
+         //--- Get the closed candle's time (bar index 1)
+         datetime closedCandleTime = iTime(_Symbol, tf, 1);
+
+         //--- Determine if this is HTF or LTF
+         string tfType = IsHTF(g_monitoredTFs[i]) ? "htf" : "ltf";
+
+         Print("Candle closed: ", _Symbol, " ", g_monitoredTFs[i], " at ", TimeToString(closedCandleTime));
+
+         if(InpGroupedCapture)
          {
-            if(InpGroupedCapture)
-               CaptureGroupedSnapshots("new_bar");
-            else
-               CaptureCurrentTimeframe("new_bar");
+            //--- Check if this is the "anchor" timeframe for the group (smallest monitored TF)
+            //--- Only trigger group capture on smallest TF close to avoid multiple group captures
+            if(IsSmallestMonitoredTF(g_monitoredTFs[i]))
+            {
+               CaptureGroupedSnapshots(closedCandleTime);
+            }
+         }
+         else
+         {
+            //--- Capture just this timeframe
+            CaptureTimeframe(_Symbol, tf, g_monitoredTFs[i], "", tfType, closedCandleTime);
          }
       }
+
+      g_lastBarTime[i] = currentBarTime;
    }
+}
+
+//+------------------------------------------------------------------+
+//| Check if timeframe is HTF                                          |
+//+------------------------------------------------------------------+
+bool IsHTF(string tf)
+{
+   for(int i = 0; i < g_htfCount; i++)
+   {
+      if(g_htfTimeframes[i] == tf)
+         return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check if this is the smallest monitored timeframe                  |
+//+------------------------------------------------------------------+
+bool IsSmallestMonitoredTF(string tf)
+{
+   int tfMinutes = TimeframeToMinutes(tf);
+
+   for(int i = 0; i < g_monitoredCount; i++)
+   {
+      int otherMinutes = TimeframeToMinutes(g_monitoredTFs[i]);
+      if(otherMinutes < tfMinutes)
+         return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Convert timeframe string to minutes                                |
+//+------------------------------------------------------------------+
+int TimeframeToMinutes(string tf)
+{
+   if(tf == "M1")  return 1;
+   if(tf == "M2")  return 2;
+   if(tf == "M3")  return 3;
+   if(tf == "M4")  return 4;
+   if(tf == "M5")  return 5;
+   if(tf == "M6")  return 6;
+   if(tf == "M10") return 10;
+   if(tf == "M12") return 12;
+   if(tf == "M15") return 15;
+   if(tf == "M20") return 20;
+   if(tf == "M30") return 30;
+   if(tf == "H1")  return 60;
+   if(tf == "H2")  return 120;
+   if(tf == "H3")  return 180;
+   if(tf == "H4")  return 240;
+   if(tf == "H6")  return 360;
+   if(tf == "H8")  return 480;
+   if(tf == "H12") return 720;
+   if(tf == "D1")  return 1440;
+   if(tf == "W1")  return 10080;
+   if(tf == "MN1") return 43200;
+   return 15; // Default
 }
 
 //+------------------------------------------------------------------+
 //| Capture all timeframes as a group                                  |
 //+------------------------------------------------------------------+
-void CaptureGroupedSnapshots(string trigger)
+void CaptureGroupedSnapshots(datetime triggerCandleTime)
 {
    string symbol = _Symbol;
    long originalChartId = ChartID();
@@ -149,7 +222,9 @@ void CaptureGroupedSnapshots(string trigger)
       ENUM_TIMEFRAMES tf = StringToTimeframe(g_htfTimeframes[i]);
       if(tf != PERIOD_CURRENT)
       {
-         CaptureTimeframe(symbol, tf, g_htfTimeframes[i], groupId, "htf", trigger);
+         //--- Get the current candle time for this HTF
+         datetime htfCandleTime = iTime(symbol, tf, 0);
+         CaptureTimeframe(symbol, tf, g_htfTimeframes[i], groupId, "htf", htfCandleTime);
          Sleep(500); // Brief pause between captures
       }
    }
@@ -160,7 +235,9 @@ void CaptureGroupedSnapshots(string trigger)
       ENUM_TIMEFRAMES tf = StringToTimeframe(g_ltfTimeframes[i]);
       if(tf != PERIOD_CURRENT)
       {
-         CaptureTimeframe(symbol, tf, g_ltfTimeframes[i], groupId, "ltf", trigger);
+         //--- Get the current candle time for this LTF
+         datetime ltfCandleTime = iTime(symbol, tf, 0);
+         CaptureTimeframe(symbol, tf, g_ltfTimeframes[i], groupId, "ltf", ltfCandleTime);
          Sleep(500);
       }
    }
@@ -168,7 +245,6 @@ void CaptureGroupedSnapshots(string trigger)
    //--- Restore original timeframe
    ChartSetSymbolPeriod(originalChartId, symbol, originalTF);
 
-   g_lastCaptureTime = TimeCurrent();
    Print("Grouped capture complete. Group ID: ", groupId);
 }
 
@@ -176,7 +252,7 @@ void CaptureGroupedSnapshots(string trigger)
 //| Capture a specific timeframe                                       |
 //+------------------------------------------------------------------+
 void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
-                      string groupId, string tfType, string trigger)
+                      string groupId, string tfType, datetime candleTime)
 {
    long chartId = ChartID();
 
@@ -192,8 +268,8 @@ void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
    ChartRedraw(chartId);
    Sleep(500);
 
-   //--- Generate snapshot ID
-   string snapshotId = GenerateSnapshotId();
+   //--- Generate snapshot ID based on symbol + timeframe + candle time (for upsert)
+   string snapshotId = GenerateSnapshotId(symbol, tfString, candleTime);
 
    //--- Capture screenshot
    string filename = "snapshot_" + snapshotId + ".png";
@@ -214,11 +290,11 @@ void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
    }
 
    //--- Build and send
-   string json = BuildJsonPayload(snapshotId, symbol, tfString, base64Data, groupId, tfType);
+   string json = BuildJsonPayload(snapshotId, symbol, tfString, base64Data, groupId, tfType, candleTime);
 
    if(SendToServer(json))
    {
-      Print("Sent: ", symbol, " ", tfString, " (", tfType, ") [", trigger, "]");
+      Print("Sent: ", symbol, " ", tfString, " (", tfType, ") candle: ", TimeToString(candleTime));
    }
    else
    {
@@ -226,61 +302,6 @@ void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
    }
 
    //--- Cleanup
-   FileDelete(filename);
-}
-
-//+------------------------------------------------------------------+
-//| Capture only current timeframe (non-grouped mode)                  |
-//+------------------------------------------------------------------+
-void CaptureCurrentTimeframe(string trigger)
-{
-   string symbol = _Symbol;
-   string timeframe = GetTimeframeString(PERIOD_CURRENT);
-
-   //--- Check if current TF is in any monitored list
-   string tfType = "";
-   if(IsInArray(timeframe, g_htfTimeframes, g_htfCount))
-      tfType = "htf";
-   else if(IsInArray(timeframe, g_ltfTimeframes, g_ltfCount))
-      tfType = "ltf";
-   else
-      return; // Not a monitored timeframe
-
-   //--- Generate IDs
-   string snapshotId = GenerateSnapshotId();
-   string groupId = ""; // No group in non-grouped mode
-
-   //--- Capture
-   string filename = "snapshot_" + snapshotId + ".png";
-
-   if(!CaptureChartScreenshot(filename))
-   {
-      Print("ERROR: Failed to capture screenshot");
-      return;
-   }
-
-   //--- Read and encode
-   string base64Data = FileToBase64(filename);
-   if(StringLen(base64Data) == 0)
-   {
-      Print("ERROR: Failed to read screenshot file");
-      FileDelete(filename);
-      return;
-   }
-
-   //--- Build and send
-   string json = BuildJsonPayload(snapshotId, symbol, timeframe, base64Data, groupId, tfType);
-
-   if(SendToServer(json))
-   {
-      g_lastCaptureTime = TimeCurrent();
-      Print("Sent: ", symbol, " ", timeframe, " (", trigger, ")");
-   }
-   else
-   {
-      Print("ERROR: Failed to send snapshot");
-   }
-
    FileDelete(filename);
 }
 
@@ -348,7 +369,7 @@ string FileToBase64(string filename)
 //| Build JSON payload for API                                         |
 //+------------------------------------------------------------------+
 string BuildJsonPayload(string snapshotId, string symbol, string timeframe,
-                        string imageBase64, string groupId, string tfType)
+                        string imageBase64, string groupId, string tfType, datetime candleTime)
 {
    //--- Current timestamp in ISO format
    string timestamp = TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS);
@@ -356,12 +377,19 @@ string BuildJsonPayload(string snapshotId, string symbol, string timeframe,
    StringReplace(timestamp, " ", "T");
    timestamp += "Z";
 
+   //--- Candle time in ISO format
+   string candleTimeStr = TimeToString(candleTime, TIME_DATE | TIME_SECONDS);
+   StringReplace(candleTimeStr, ".", "-");
+   StringReplace(candleTimeStr, " ", "T");
+   candleTimeStr += "Z";
+
    //--- Build JSON
    string json = "{";
    json += "\"snapshot_id\":\"" + snapshotId + "\",";
    json += "\"symbol\":\"" + symbol + "\",";
    json += "\"timeframe\":\"" + timeframe + "\",";
    json += "\"snapshot_time\":\"" + timestamp + "\",";
+   json += "\"candle_time\":\"" + candleTimeStr + "\",";
    json += "\"image_data\":\"" + imageBase64 + "\"";
 
    //--- Add group info if present
@@ -416,7 +444,7 @@ bool SendToServer(string json)
 
    string response = CharArrayToString(result);
 
-   if(responseCode == 201)
+   if(responseCode == 200 || responseCode == 201)
    {
       return true;
    }
@@ -437,22 +465,22 @@ bool SendToServer(string json)
 }
 
 //+------------------------------------------------------------------+
-//| Generate unique snapshot ID                                        |
+//| Generate deterministic snapshot ID based on symbol+tf+candle       |
 //+------------------------------------------------------------------+
-string GenerateSnapshotId()
+string GenerateSnapshotId(string symbol, string timeframe, datetime candleTime)
 {
-   string id = IntegerToString(TimeCurrent());
+   //--- Create deterministic ID: symbol_timeframe_candleTimestamp
+   //--- This allows server to upsert based on this key
+   string id = symbol + "_" + timeframe + "_" + IntegerToString((long)candleTime);
 
-   string sym = _Symbol;
+   //--- Hash it to keep it shorter and URL-safe
    uint hash = 0;
-   for(int i = 0; i < StringLen(sym); i++)
+   for(int i = 0; i < StringLen(id); i++)
    {
-      hash = hash * 31 + StringGetCharacter(sym, i);
+      hash = hash * 31 + StringGetCharacter(id, i);
    }
-   id += "_" + IntegerToString(hash);
-   id += "_" + IntegerToString(MathRand());
 
-   return id;
+   return IntegerToString((long)candleTime) + "_" + timeframe + "_" + IntegerToString(hash);
 }
 
 //+------------------------------------------------------------------+
@@ -465,38 +493,6 @@ string GenerateGroupId()
    id += "_" + _Symbol;
    id += "_" + IntegerToString(MathRand() % 10000);
    return id;
-}
-
-//+------------------------------------------------------------------+
-//| Convert ENUM_TIMEFRAMES to string                                  |
-//+------------------------------------------------------------------+
-string GetTimeframeString(ENUM_TIMEFRAMES tf)
-{
-   switch(tf)
-   {
-      case PERIOD_M1:  return "M1";
-      case PERIOD_M2:  return "M2";
-      case PERIOD_M3:  return "M3";
-      case PERIOD_M4:  return "M4";
-      case PERIOD_M5:  return "M5";
-      case PERIOD_M6:  return "M6";
-      case PERIOD_M10: return "M10";
-      case PERIOD_M12: return "M12";
-      case PERIOD_M15: return "M15";
-      case PERIOD_M20: return "M20";
-      case PERIOD_M30: return "M30";
-      case PERIOD_H1:  return "H1";
-      case PERIOD_H2:  return "H2";
-      case PERIOD_H3:  return "H3";
-      case PERIOD_H4:  return "H4";
-      case PERIOD_H6:  return "H6";
-      case PERIOD_H8:  return "H8";
-      case PERIOD_H12: return "H12";
-      case PERIOD_D1:  return "D1";
-      case PERIOD_W1:  return "W1";
-      case PERIOD_MN1: return "MN1";
-      default:         return "M15";
-   }
 }
 
 //+------------------------------------------------------------------+
@@ -529,26 +525,30 @@ ENUM_TIMEFRAMES StringToTimeframe(string tf)
 }
 
 //+------------------------------------------------------------------+
-//| Check if string is in array                                        |
-//+------------------------------------------------------------------+
-bool IsInArray(string value, string &arr[], int count)
-{
-   for(int i = 0; i < count; i++)
-   {
-      if(arr[i] == value)
-         return true;
-   }
-   return false;
-}
-
-//+------------------------------------------------------------------+
 //| Manual capture function (can be called from button/hotkey)         |
 //+------------------------------------------------------------------+
 void ManualCapture()
 {
+   datetime now = TimeCurrent();
    if(InpGroupedCapture)
-      CaptureGroupedSnapshots("manual");
+      CaptureGroupedSnapshots(now);
    else
-      CaptureCurrentTimeframe("manual");
+   {
+      ENUM_TIMEFRAMES tf = ChartPeriod(ChartID());
+      string tfStr = "";
+      for(int i = 0; i < g_monitoredCount; i++)
+      {
+         if(StringToTimeframe(g_monitoredTFs[i]) == tf)
+         {
+            tfStr = g_monitoredTFs[i];
+            break;
+         }
+      }
+      if(StringLen(tfStr) > 0)
+      {
+         string tfType = IsHTF(tfStr) ? "htf" : "ltf";
+         CaptureTimeframe(_Symbol, tf, tfStr, "", tfType, iTime(_Symbol, tf, 0));
+      }
+   }
 }
 //+------------------------------------------------------------------+

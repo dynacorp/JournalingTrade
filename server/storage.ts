@@ -1,6 +1,6 @@
 import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, type WeeklyInsight, type ChartSnapshot, type InsertChartSnapshot, type ChartSnapshotStatus, users, trades, mt5Accounts, appSettings, weeklyInsights, chartSnapshots } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, or, inArray } from "drizzle-orm";
 import { randomBytes } from "crypto";
 
 export interface IStorage {
@@ -56,6 +56,15 @@ export interface IStorage {
   }>;
   autoMatchSnapshotToTrade(snapshotId: number): Promise<number | null>;
   getChartSnapshotsByGroupId(groupId: string): Promise<ChartSnapshot[]>;
+
+  // Upsert snapshot (update if same symbol+timeframe+candle_time exists for LTF, or keep history for HTF)
+  upsertChartSnapshot(snapshot: InsertChartSnapshot & { candle_time?: Date }, isHTF: boolean): Promise<ChartSnapshot>;
+
+  // Find existing snapshot by symbol+timeframe+candle_time
+  findSnapshotByCandleKey(symbol: string, timeframe: string, candleTime: Date): Promise<ChartSnapshot | undefined>;
+
+  // Cleanup old LTF pending snapshots (keep only latest per symbol/timeframe)
+  cleanupOldLTFSnapshots(maxAgeHours?: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -393,6 +402,132 @@ export class DatabaseStorage implements IStorage {
       .from(chartSnapshots)
       .where(eq(chartSnapshots.group_id, groupId))
       .orderBy(desc(chartSnapshots.timeframe)); // HTF first (H4 > H1 > M15 > M5)
+  }
+
+  async findSnapshotByCandleKey(symbol: string, timeframe: string, candleTime: Date): Promise<ChartSnapshot | undefined> {
+    const result = await db
+      .select()
+      .from(chartSnapshots)
+      .where(
+        and(
+          eq(chartSnapshots.symbol, symbol),
+          eq(chartSnapshots.timeframe, timeframe),
+          eq(chartSnapshots.candle_time, candleTime)
+        )
+      )
+      .limit(1);
+    return result[0];
+  }
+
+  async upsertChartSnapshot(
+    snapshot: InsertChartSnapshot & { candle_time?: Date },
+    isHTF: boolean
+  ): Promise<ChartSnapshot> {
+    const parseDate = (val: string | null | undefined): Date | null => {
+      if (!val || val === "") return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    const snapshotWithDates = {
+      ...snapshot,
+      snapshot_time: parseDate(snapshot.snapshot_time) || new Date(),
+      candle_time: snapshot.candle_time || null,
+    };
+
+    // For HTF, we keep candle history (don't upsert, just check for exact duplicate)
+    // For LTF, we upsert based on symbol+timeframe (keep only latest)
+    if (isHTF && snapshotWithDates.candle_time) {
+      // HTF: Check if this exact candle already exists
+      const existing = await this.findSnapshotByCandleKey(
+        snapshotWithDates.symbol,
+        snapshotWithDates.timeframe,
+        snapshotWithDates.candle_time
+      );
+
+      if (existing) {
+        // Update the existing record with new image
+        const updated = await db
+          .update(chartSnapshots)
+          .set({
+            image_data: snapshotWithDates.image_data,
+            snapshot_time: snapshotWithDates.snapshot_time,
+            group_id: snapshotWithDates.group_id || existing.group_id,
+          })
+          .where(eq(chartSnapshots.id, existing.id))
+          .returning();
+        return updated[0];
+      }
+    } else {
+      // LTF: Find and update the latest snapshot for this symbol+timeframe
+      // (regardless of candle_time - keep only latest)
+      const existing = await db
+        .select()
+        .from(chartSnapshots)
+        .where(
+          and(
+            eq(chartSnapshots.symbol, snapshotWithDates.symbol),
+            eq(chartSnapshots.timeframe, snapshotWithDates.timeframe),
+            // Only upsert pending/pre_analyzed snapshots, not analyzed ones
+            or(
+              eq(chartSnapshots.status, "pending"),
+              eq(chartSnapshots.status, "pre_analyzed")
+            )
+          )
+        )
+        .orderBy(desc(chartSnapshots.created_at))
+        .limit(1);
+
+      if (existing[0]) {
+        // Update existing LTF snapshot with new data
+        const updated = await db
+          .update(chartSnapshots)
+          .set({
+            snapshot_id: snapshotWithDates.snapshot_id,
+            image_data: snapshotWithDates.image_data,
+            snapshot_time: snapshotWithDates.snapshot_time,
+            candle_time: snapshotWithDates.candle_time,
+            group_id: snapshotWithDates.group_id || existing[0].group_id,
+            // Reset analysis since image changed
+            status: "pending",
+            pre_analysis_score: null,
+            pre_analysis_summary: null,
+            pre_analysis_bias: null,
+            pre_analysis_at: null,
+          })
+          .where(eq(chartSnapshots.id, existing[0].id))
+          .returning();
+        return updated[0];
+      }
+    }
+
+    // No existing record found, create new
+    const result = await db.insert(chartSnapshots).values(snapshotWithDates).returning();
+    return result[0];
+  }
+
+  async cleanupOldLTFSnapshots(maxAgeHours: number = 24): Promise<number> {
+    const cutoffTime = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+
+    // LTF timeframes (less than H1 = 60 minutes)
+    const ltfTimeframes = ["M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15", "M20", "M30"];
+
+    // Delete old pending/pre_analyzed LTF snapshots
+    const result = await db
+      .delete(chartSnapshots)
+      .where(
+        and(
+          inArray(chartSnapshots.timeframe, ltfTimeframes),
+          or(
+            eq(chartSnapshots.status, "pending"),
+            eq(chartSnapshots.status, "pre_analyzed")
+          ),
+          lt(chartSnapshots.created_at, cutoffTime)
+        )
+      )
+      .returning();
+
+    return result.length;
   }
 }
 

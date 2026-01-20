@@ -137,6 +137,7 @@ export const chartSnapshots = pgTable("chart_snapshots", {
   symbol: varchar("symbol", { length: 50 }).notNull(),
   timeframe: varchar("timeframe", { length: 10 }).notNull(),
   snapshot_time: timestamp("snapshot_time", { withTimezone: true }).notNull(),
+  candle_time: timestamp("candle_time", { withTimezone: true }), // The candle open time (for upsert key)
 
   // Multi-Timeframe Grouping
   group_id: varchar("group_id", { length: 100 }), // Links MTF snapshots together
@@ -278,6 +279,7 @@ export const ingestChartSnapshotSchema = z.object({
   symbol: z.string().min(1).max(50),
   timeframe: z.string().min(1).max(10),
   snapshot_time: z.string(),
+  candle_time: z.string().optional(), // The candle open time (for upsert key)
   image_data: z.string().min(1),
   group_id: z.string().max(100).optional(),
   tf_type: z.enum(["htf", "ltf"]).optional(),
