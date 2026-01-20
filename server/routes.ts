@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertTradeSchema, insertMT5AccountSchema } from "@shared/schema";
+import { insertTradeSchema, insertMT5AccountSchema, ingestChartSnapshotSchema, type ChartSnapshotStatus } from "@shared/schema";
 import { generateTradeAnalysis, generateWeeklyAnalysis } from "./openai";
+import { processSnapshot, runAndSaveFullAnalysis } from "./chart-analysis";
 import { fromZodError } from "zod-validation-error";
 import { startOfWeek, endOfWeek, subWeeks, isSunday } from "date-fns";
 
@@ -405,16 +406,306 @@ export async function registerRoutes(
     try {
       const { key } = req.params;
       const { value } = req.body;
-      
+
       if (typeof value !== "string") {
         return res.status(400).json({ error: "Value must be a string" });
       }
-      
+
       await storage.setSetting(key, value);
       res.json({ key, value });
     } catch (error) {
       console.error("Error saving setting:", error);
       res.status(500).json({ error: "Failed to save setting" });
+    }
+  });
+
+  // ==================== CHART SNAPSHOTS ====================
+
+  // POST /api/chart-snapshots/ingest - EA sends chart screenshot (requires ingestion_key)
+  app.post("/api/chart-snapshots/ingest", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Missing or invalid authorization header" });
+      }
+
+      const ingestionKey = authHeader.substring(7);
+      const mt5Account = await storage.getMT5AccountByIngestionKey(ingestionKey);
+
+      if (!mt5Account) {
+        return res.status(401).json({ error: "Invalid ingestion key" });
+      }
+
+      const validated = ingestChartSnapshotSchema.parse(req.body);
+
+      // Check for duplicate snapshot
+      const existing = await storage.getChartSnapshotBySnapshotId(validated.snapshot_id);
+      if (existing) {
+        return res.status(409).json({
+          error: "Snapshot already exists",
+          snapshot: { id: existing.id, status: existing.status }
+        });
+      }
+
+      // Create snapshot
+      const snapshot = await storage.createChartSnapshot({
+        ...validated,
+        account_id: mt5Account.account_id,
+        status: "pending",
+      });
+
+      // Process snapshot asynchronously (pre-analysis + optional auto full analysis)
+      processSnapshot(snapshot.id).catch(err => {
+        console.error("Background snapshot processing failed:", err);
+      });
+
+      res.status(201).json({
+        id: snapshot.id,
+        snapshot_id: snapshot.snapshot_id,
+        status: "pending",
+        message: "Snapshot received, analysis queued"
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        const validationError = fromZodError(error);
+        return res.status(400).json({ error: validationError.message });
+      }
+      console.error("Error ingesting chart snapshot:", error);
+      res.status(500).json({ error: "Failed to ingest chart snapshot" });
+    }
+  });
+
+  // GET /api/chart-snapshots - List snapshots with filters
+  app.get("/api/chart-snapshots", async (req, res) => {
+    try {
+      const { status, symbol, timeframe, start_date, end_date, account_id } = req.query;
+
+      const params: {
+        status?: ChartSnapshotStatus;
+        symbol?: string;
+        timeframe?: string;
+        startDate?: Date;
+        endDate?: Date;
+        accountId?: string;
+      } = {};
+
+      if (status) params.status = status as ChartSnapshotStatus;
+      if (symbol) params.symbol = symbol as string;
+      if (timeframe) params.timeframe = timeframe as string;
+      if (start_date) params.startDate = new Date(start_date as string);
+      if (end_date) params.endDate = new Date(end_date as string);
+      if (account_id) params.accountId = account_id as string;
+
+      const snapshots = await storage.getAllChartSnapshots(params);
+
+      // Don't send image_data in list response to reduce payload size
+      const sanitized = snapshots.map(s => ({
+        ...s,
+        image_data: undefined,
+        has_image: !!s.image_data,
+      }));
+
+      res.json(sanitized);
+    } catch (error) {
+      console.error("Error fetching chart snapshots:", error);
+      res.status(500).json({ error: "Failed to fetch chart snapshots" });
+    }
+  });
+
+  // GET /api/chart-snapshots/stats - Get queue statistics
+  app.get("/api/chart-snapshots/stats", async (req, res) => {
+    try {
+      const stats = await storage.getChartSnapshotStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching snapshot stats:", error);
+      res.status(500).json({ error: "Failed to fetch snapshot stats" });
+    }
+  });
+
+  // GET /api/chart-snapshots/:id - Get single snapshot with full details
+  app.get("/api/chart-snapshots/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const snapshot = await storage.getChartSnapshot(id);
+
+      if (!snapshot) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      // Parse full_analysis JSON if present
+      let parsedAnalysis = null;
+      if (snapshot.full_analysis) {
+        try {
+          parsedAnalysis = JSON.parse(snapshot.full_analysis);
+        } catch {
+          parsedAnalysis = null;
+        }
+      }
+
+      res.json({
+        ...snapshot,
+        full_analysis_parsed: parsedAnalysis,
+      });
+    } catch (error) {
+      console.error("Error fetching chart snapshot:", error);
+      res.status(500).json({ error: "Failed to fetch chart snapshot" });
+    }
+  });
+
+  // PATCH /api/chart-snapshots/:id - Update snapshot (notes, etc.)
+  app.patch("/api/chart-snapshots/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { user_notes } = req.body;
+
+      const updated = await storage.updateChartSnapshot(id, { user_notes });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating chart snapshot:", error);
+      res.status(500).json({ error: "Failed to update chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/approve - Approve snapshot for full analysis
+  app.post("/api/chart-snapshots/:id/approve", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const snapshot = await storage.getChartSnapshot(id);
+
+      if (!snapshot) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      // Update status to approved
+      await storage.updateChartSnapshot(id, { status: "approved" });
+
+      // Run full analysis
+      const analyzed = await runAndSaveFullAnalysis(id);
+
+      res.json(analyzed);
+    } catch (error) {
+      console.error("Error approving chart snapshot:", error);
+      res.status(500).json({ error: "Failed to approve chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/discard - Mark snapshot as discarded
+  app.post("/api/chart-snapshots/:id/discard", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+
+      const updated = await storage.updateChartSnapshot(id, { status: "discarded" });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error discarding chart snapshot:", error);
+      res.status(500).json({ error: "Failed to discard chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/analyze - Force/re-run full analysis
+  app.post("/api/chart-snapshots/:id/analyze", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const snapshot = await storage.getChartSnapshot(id);
+
+      if (!snapshot) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      // Run full analysis (re-run even if already analyzed)
+      const analyzed = await runAndSaveFullAnalysis(id);
+
+      res.json(analyzed);
+    } catch (error) {
+      console.error("Error analyzing chart snapshot:", error);
+      res.status(500).json({ error: "Failed to analyze chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/link-trade - Manually link snapshot to trade
+  app.post("/api/chart-snapshots/:id/link-trade", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { trade_id } = req.body;
+
+      if (!trade_id || typeof trade_id !== "number") {
+        return res.status(400).json({ error: "trade_id is required and must be a number" });
+      }
+
+      // Verify trade exists
+      const trade = await storage.getTrade(trade_id);
+      if (!trade) {
+        return res.status(404).json({ error: "Trade not found" });
+      }
+
+      const updated = await storage.updateChartSnapshot(id, {
+        linked_trade_id: trade_id,
+        auto_linked: false,
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error linking snapshot to trade:", error);
+      res.status(500).json({ error: "Failed to link snapshot to trade" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/unlink-trade - Remove trade link
+  app.post("/api/chart-snapshots/:id/unlink-trade", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+
+      const updated = await storage.updateChartSnapshot(id, {
+        linked_trade_id: null,
+        auto_linked: false,
+      });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error unlinking snapshot from trade:", error);
+      res.status(500).json({ error: "Failed to unlink snapshot from trade" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/mark-journal - Mark/unmark as journal candidate
+  app.post("/api/chart-snapshots/:id/mark-journal", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { is_journal_candidate } = req.body;
+
+      if (typeof is_journal_candidate !== "boolean") {
+        return res.status(400).json({ error: "is_journal_candidate must be a boolean" });
+      }
+
+      const updated = await storage.updateChartSnapshot(id, { is_journal_candidate });
+
+      if (!updated) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error marking snapshot as journal candidate:", error);
+      res.status(500).json({ error: "Failed to update snapshot" });
     }
   });
 

@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, type WeeklyInsight, users, trades, mt5Accounts, appSettings, weeklyInsights } from "@shared/schema";
+import { type User, type InsertUser, type Trade, type InsertTrade, type MT5Account, type InsertMT5Account, type WeeklyInsight, type ChartSnapshot, type InsertChartSnapshot, type ChartSnapshotStatus, users, trades, mt5Accounts, appSettings, weeklyInsights, chartSnapshots } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { randomBytes } from "crypto";
@@ -34,6 +34,27 @@ export interface IStorage {
   getWeeklyInsight(weekStart: Date): Promise<WeeklyInsight | undefined>;
   getLatestWeeklyInsight(): Promise<WeeklyInsight | undefined>;
   createWeeklyInsight(insight: Omit<WeeklyInsight, "id" | "generated_at">): Promise<WeeklyInsight>;
+
+  // Chart Snapshot operations
+  getChartSnapshot(id: number): Promise<ChartSnapshot | undefined>;
+  getChartSnapshotBySnapshotId(snapshotId: string): Promise<ChartSnapshot | undefined>;
+  getAllChartSnapshots(params?: {
+    status?: ChartSnapshotStatus;
+    symbol?: string;
+    timeframe?: string;
+    startDate?: Date;
+    endDate?: Date;
+    accountId?: string;
+  }): Promise<ChartSnapshot[]>;
+  createChartSnapshot(snapshot: InsertChartSnapshot): Promise<ChartSnapshot>;
+  updateChartSnapshot(id: number, updates: Partial<ChartSnapshot>): Promise<ChartSnapshot | undefined>;
+  getChartSnapshotStats(): Promise<{
+    pending: number;
+    queued: number;
+    analyzed: number;
+    high_score_count: number;
+  }>;
+  autoMatchSnapshotToTrade(snapshotId: number): Promise<number | null>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -232,6 +253,137 @@ export class DatabaseStorage implements IStorage {
   async createWeeklyInsight(insight: Omit<WeeklyInsight, "id" | "generated_at">): Promise<WeeklyInsight> {
     const result = await db.insert(weeklyInsights).values(insight).returning();
     return result[0];
+  }
+
+  // Chart Snapshot operations
+  async getChartSnapshot(id: number): Promise<ChartSnapshot | undefined> {
+    const result = await db
+      .select()
+      .from(chartSnapshots)
+      .where(eq(chartSnapshots.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async getChartSnapshotBySnapshotId(snapshotId: string): Promise<ChartSnapshot | undefined> {
+    const result = await db
+      .select()
+      .from(chartSnapshots)
+      .where(eq(chartSnapshots.snapshot_id, snapshotId))
+      .limit(1);
+    return result[0];
+  }
+
+  async getAllChartSnapshots(params?: {
+    status?: ChartSnapshotStatus;
+    symbol?: string;
+    timeframe?: string;
+    startDate?: Date;
+    endDate?: Date;
+    accountId?: string;
+  }): Promise<ChartSnapshot[]> {
+    const conditions: any[] = [];
+
+    if (params?.status) {
+      conditions.push(eq(chartSnapshots.status, params.status));
+    }
+    if (params?.symbol) {
+      conditions.push(eq(chartSnapshots.symbol, params.symbol));
+    }
+    if (params?.timeframe) {
+      conditions.push(eq(chartSnapshots.timeframe, params.timeframe));
+    }
+    if (params?.startDate) {
+      conditions.push(gte(chartSnapshots.snapshot_time, params.startDate));
+    }
+    if (params?.endDate) {
+      conditions.push(lte(chartSnapshots.snapshot_time, params.endDate));
+    }
+    if (params?.accountId) {
+      conditions.push(eq(chartSnapshots.account_id, params.accountId));
+    }
+
+    if (conditions.length > 0) {
+      return await db
+        .select()
+        .from(chartSnapshots)
+        .where(and(...conditions))
+        .orderBy(desc(chartSnapshots.created_at));
+    }
+
+    return await db
+      .select()
+      .from(chartSnapshots)
+      .orderBy(desc(chartSnapshots.created_at));
+  }
+
+  async createChartSnapshot(snapshot: InsertChartSnapshot): Promise<ChartSnapshot> {
+    const parseDate = (val: string | null | undefined): Date | null => {
+      if (!val || val === "") return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d;
+    };
+
+    const snapshotWithDates = {
+      ...snapshot,
+      snapshot_time: parseDate(snapshot.snapshot_time) || new Date(),
+    };
+
+    const result = await db.insert(chartSnapshots).values(snapshotWithDates).returning();
+    return result[0];
+  }
+
+  async updateChartSnapshot(id: number, updates: Partial<ChartSnapshot>): Promise<ChartSnapshot | undefined> {
+    const result = await db
+      .update(chartSnapshots)
+      .set(updates)
+      .where(eq(chartSnapshots.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getChartSnapshotStats(): Promise<{
+    pending: number;
+    queued: number;
+    analyzed: number;
+    high_score_count: number;
+  }> {
+    const all = await db.select().from(chartSnapshots);
+
+    return {
+      pending: all.filter(s => s.status === "pending" || s.status === "pre_analyzed").length,
+      queued: all.filter(s => s.status === "queued_for_review" || s.status === "approved").length,
+      analyzed: all.filter(s => s.status === "analyzed" || s.status === "no_setup").length,
+      high_score_count: all.filter(s => (s.confluence_score ?? 0) >= 70).length,
+    };
+  }
+
+  async autoMatchSnapshotToTrade(snapshotId: number): Promise<number | null> {
+    const snapshot = await this.getChartSnapshot(snapshotId);
+    if (!snapshot) return null;
+
+    // Find trades within +/- 4 hours of snapshot time
+    const windowMs = 4 * 60 * 60 * 1000;
+    const windowStart = new Date(snapshot.snapshot_time.getTime() - windowMs);
+    const windowEnd = new Date(snapshot.snapshot_time.getTime() + windowMs);
+
+    const candidateTrades = await this.getTradesByDateRange(windowStart, windowEnd);
+
+    // Filter by symbol match
+    const symbolMatches = candidateTrades.filter(
+      t => t.symbol.toUpperCase() === snapshot.symbol.toUpperCase()
+    );
+
+    // If exactly one match, auto-link
+    if (symbolMatches.length === 1) {
+      await this.updateChartSnapshot(snapshotId, {
+        linked_trade_id: symbolMatches[0].id,
+        auto_linked: true,
+      });
+      return symbolMatches[0].id;
+    }
+
+    return null;
   }
 }
 

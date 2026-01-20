@@ -1,0 +1,181 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import type { ChartSnapshot, ChartSnapshotStatus, FullAnalysisResult } from "@shared/schema";
+
+export interface ChartSnapshotListItem extends Omit<ChartSnapshot, "image_data"> {
+  has_image: boolean;
+}
+
+export interface ChartSnapshotWithParsedAnalysis extends ChartSnapshot {
+  full_analysis_parsed: FullAnalysisResult | null;
+}
+
+interface ChartSnapshotFilters {
+  status?: ChartSnapshotStatus;
+  symbol?: string;
+  timeframe?: string;
+  start_date?: string;
+  end_date?: string;
+  account_id?: string;
+}
+
+interface ChartSnapshotStats {
+  pending: number;
+  queued: number;
+  analyzed: number;
+  high_score_count: number;
+}
+
+export function useChartSnapshots(filters?: ChartSnapshotFilters) {
+  return useQuery<ChartSnapshotListItem[]>({
+    queryKey: ["chart-snapshots", filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.symbol) params.set("symbol", filters.symbol);
+      if (filters?.timeframe) params.set("timeframe", filters.timeframe);
+      if (filters?.start_date) params.set("start_date", filters.start_date);
+      if (filters?.end_date) params.set("end_date", filters.end_date);
+      if (filters?.account_id) params.set("account_id", filters.account_id);
+
+      const queryString = params.toString();
+      const url = `/api/chart-snapshots${queryString ? `?${queryString}` : ""}`;
+      const res = await apiRequest("GET", url);
+      return res.json();
+    },
+  });
+}
+
+export function useChartSnapshot(id: number | null) {
+  return useQuery<ChartSnapshotWithParsedAnalysis>({
+    queryKey: ["chart-snapshot", id],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/chart-snapshots/${id}`);
+      return res.json();
+    },
+    enabled: id !== null,
+  });
+}
+
+export function useChartSnapshotStats() {
+  return useQuery<ChartSnapshotStats>({
+    queryKey: ["chart-snapshot-stats"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/chart-snapshots/stats");
+      return res.json();
+    },
+  });
+}
+
+export function useApproveSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/approve`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
+    },
+  });
+}
+
+export function useDiscardSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/discard`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
+    },
+  });
+}
+
+export function useAnalyzeSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/analyze`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
+    },
+  });
+}
+
+export function useLinkSnapshotToTrade() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ snapshotId, tradeId }: { snapshotId: number; tradeId: number }) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/link-trade`, {
+        trade_id: tradeId,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+    },
+  });
+}
+
+export function useUnlinkSnapshotFromTrade() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (snapshotId: number) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/unlink-trade`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+    },
+  });
+}
+
+export function useUpdateSnapshotNotes() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, notes }: { id: number; notes: string }) => {
+      const res = await apiRequest("PATCH", `/api/chart-snapshots/${id}`, {
+        user_notes: notes,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+    },
+  });
+}
+
+export function useMarkJournalCandidate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, isCandidate }: { id: number; isCandidate: boolean }) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/mark-journal`, {
+        is_journal_candidate: isCandidate,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+    },
+  });
+}

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, real, timestamp, serial, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, real, timestamp, serial, boolean, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -126,3 +126,156 @@ export type User = typeof users.$inferSelect;
 export type InsertMT5Account = z.infer<typeof insertMT5AccountSchema>;
 export type MT5Account = typeof mt5Accounts.$inferSelect;
 export type WeeklyInsight = typeof weeklyInsights.$inferSelect;
+
+// Chart Snapshots for AI Analysis
+export const chartSnapshots = pgTable("chart_snapshots", {
+  id: serial("id").primaryKey(),
+  snapshot_id: varchar("snapshot_id", { length: 64 }).notNull().unique(),
+  account_id: varchar("account_id", { length: 100 }).notNull(),
+
+  // Chart Context
+  symbol: varchar("symbol", { length: 20 }).notNull(),
+  timeframe: varchar("timeframe", { length: 10 }).notNull(),
+  snapshot_time: timestamp("snapshot_time", { withTimezone: true }).notNull(),
+
+  // Image Storage (Base64)
+  image_data: text("image_data").notNull(),
+
+  // Status: pending | pre_analyzed | queued_for_review | approved | analyzed | discarded | no_setup
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+
+  // Pre-Analysis (lightweight, always runs)
+  pre_analysis_score: real("pre_analysis_score"),
+  pre_analysis_summary: text("pre_analysis_summary"),
+  pre_analysis_bias: varchar("pre_analysis_bias", { length: 20 }),
+  pre_analysis_at: timestamp("pre_analysis_at", { withTimezone: true }),
+
+  // Full Analysis (gated, runs on approval or high score)
+  full_analysis: text("full_analysis"), // JSON stringified FullAnalysisResult
+  full_analysis_at: timestamp("full_analysis_at", { withTimezone: true }),
+
+  // Confluence Scores (extracted from full analysis for querying)
+  confluence_score: real("confluence_score"),
+  market_structure_score: real("market_structure_score"),
+  key_levels_score: real("key_levels_score"),
+  liquidity_score: real("liquidity_score"),
+  impulse_origin_score: real("impulse_origin_score"),
+  imbalance_score: real("imbalance_score"),
+  candle_action_score: real("candle_action_score"),
+
+  // Entry Logic (extracted from full analysis)
+  trade_direction: varchar("trade_direction", { length: 10 }), // long | short | none
+  entry_zone: text("entry_zone"),
+  invalidation_level: real("invalidation_level"),
+  invalidation_reason: text("invalidation_reason"),
+
+  // Trade Linking
+  linked_trade_id: integer("linked_trade_id").references(() => trades.id),
+  auto_linked: boolean("auto_linked").default(false),
+
+  // Metadata
+  user_notes: text("user_notes"),
+  is_journal_candidate: boolean("is_journal_candidate").default(false),
+  created_at: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Full analysis JSON structure type
+export interface FullAnalysisResult {
+  market_structure: {
+    trend_state: "uptrend" | "downtrend" | "range" | "transitioning";
+    structure_points: string[];
+    bos_detected: boolean;
+    choch_detected: boolean;
+    score: number;
+  };
+  key_levels: {
+    support_levels: number[];
+    resistance_levels: number[];
+    sr_flips: number[];
+    session_levels: { high: number | null; low: number | null };
+    score: number;
+  };
+  liquidity: {
+    equal_highs: number[];
+    equal_lows: number[];
+    sweep_detected: boolean;
+    failed_breakout: boolean;
+    score: number;
+  };
+  impulse_origin: {
+    origin_zones: { start: number; end: number }[];
+    compression_detected: boolean;
+    expansion_detected: boolean;
+    score: number;
+  };
+  imbalance: {
+    fvg_zones: { start: number; end: number; filled: boolean }[];
+    rebalancing_in_progress: boolean;
+    score: number;
+  };
+  candle_action: {
+    rejection_wicks: string[];
+    displacement_detected: boolean;
+    acceptance_rejection: "acceptance" | "rejection" | "neutral";
+    score: number;
+  };
+  entry_logic: {
+    valid_setup: boolean;
+    entry_zone: string;
+    invalidation_level: number;
+    invalidation_reason: string;
+    trade_direction: "long" | "short" | "none";
+    targets: number[];
+    confluence_list: string[];
+    confidence: number;
+  };
+  overall_assessment: string;
+  weighted_score: number;
+}
+
+export type ChartSnapshotStatus =
+  | "pending"
+  | "pre_analyzed"
+  | "queued_for_review"
+  | "approved"
+  | "analyzed"
+  | "discarded"
+  | "no_setup";
+
+export const insertChartSnapshotSchema = createInsertSchema(chartSnapshots, {
+  snapshot_time: z.string(),
+}).omit({
+  id: true,
+  created_at: true,
+  pre_analysis_score: true,
+  pre_analysis_summary: true,
+  pre_analysis_bias: true,
+  pre_analysis_at: true,
+  full_analysis: true,
+  full_analysis_at: true,
+  confluence_score: true,
+  market_structure_score: true,
+  key_levels_score: true,
+  liquidity_score: true,
+  impulse_origin_score: true,
+  imbalance_score: true,
+  candle_action_score: true,
+  trade_direction: true,
+  entry_zone: true,
+  invalidation_level: true,
+  invalidation_reason: true,
+  linked_trade_id: true,
+  auto_linked: true,
+  is_journal_candidate: true,
+});
+
+export const ingestChartSnapshotSchema = z.object({
+  snapshot_id: z.string().min(1).max(64),
+  symbol: z.string().min(1).max(20),
+  timeframe: z.string().min(1).max(10),
+  snapshot_time: z.string(),
+  image_data: z.string().min(1),
+});
+
+export type InsertChartSnapshot = z.infer<typeof insertChartSnapshotSchema>;
+export type ChartSnapshot = typeof chartSnapshots.$inferSelect;
