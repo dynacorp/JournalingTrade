@@ -138,6 +138,10 @@ export const chartSnapshots = pgTable("chart_snapshots", {
   timeframe: varchar("timeframe", { length: 10 }).notNull(),
   snapshot_time: timestamp("snapshot_time", { withTimezone: true }).notNull(),
 
+  // Multi-Timeframe Grouping
+  group_id: varchar("group_id", { length: 100 }), // Links MTF snapshots together
+  tf_type: varchar("tf_type", { length: 10 }), // "htf" (higher TF for bias) or "ltf" (lower TF for entry)
+
   // Image Storage (Base64)
   image_data: text("image_data").notNull(),
 
@@ -275,6 +279,8 @@ export const ingestChartSnapshotSchema = z.object({
   timeframe: z.string().min(1).max(10),
   snapshot_time: z.string(),
   image_data: z.string().min(1),
+  group_id: z.string().max(100).optional(),
+  tf_type: z.enum(["htf", "ltf"]).optional(),
 });
 
 export type InsertChartSnapshot = z.infer<typeof insertChartSnapshotSchema>;

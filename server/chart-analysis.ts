@@ -76,7 +76,8 @@ Respond with JSON only:
 export async function runFullAnalysis(
   imageBase64: string,
   symbol: string,
-  timeframe: string
+  timeframe: string,
+  htfContext?: string
 ): Promise<FullAnalysisResult> {
   try {
     const systemPrompt = `You are an expert price action analyst specializing in institutional order flow concepts.
@@ -181,7 +182,8 @@ Respond with JSON matching this exact structure:
 
 If no valid setup exists, set entry_logic.valid_setup to false and overall_assessment should state "No valid trade setup identified" with explanation.`;
 
-    const userPrompt = `Analyze this ${symbol} ${timeframe} chart for trading opportunities using pure price action analysis.
+    // Build user prompt with optional HTF context
+    let userPrompt = `Analyze this ${symbol} ${timeframe} chart for trading opportunities using pure price action analysis.
 
 Provide comprehensive analysis of all confluence categories. Calculate weighted_score as:
 - Market Structure: 25%
@@ -192,6 +194,20 @@ Provide comprehensive analysis of all confluence categories. Calculate weighted_
 - Candle Action: 10%
 
 Only identify a valid setup if multiple confluences align. Be conservative - it's better to miss a trade than force a bad one.`;
+
+    // Add HTF context for LTF entry analysis
+    if (htfContext) {
+      userPrompt += `
+
+IMPORTANT - Higher Timeframe Context (use this to confirm bias and direction):
+${htfContext}
+
+This is a LOWER TIMEFRAME (${timeframe}) chart for ENTRY timing. Your entry MUST align with the HTF bias above.
+- If HTF is bullish, only look for LONG entries
+- If HTF is bearish, only look for SHORT entries
+- Identify precise entry zones near HTF key levels
+- Entry invalidation should be below/above the origin of the LTF move`
+    }
 
     const response = await openai.chat.completions.create({
       model: "gpt-5",
@@ -303,10 +319,29 @@ export async function runAndSaveFullAnalysis(snapshotId: number): Promise<ChartS
   if (!snapshot) return null;
 
   try {
+    // Check if this is part of a group
+    let htfContext: string | undefined;
+    if (snapshot.group_id && snapshot.tf_type === "ltf") {
+      // Get HTF snapshots from the same group for context
+      const groupSnapshots = await storage.getChartSnapshotsByGroupId(snapshot.group_id);
+      const htfSnapshots = groupSnapshots.filter(s => s.tf_type === "htf" && s.full_analysis);
+
+      if (htfSnapshots.length > 0) {
+        // Build context from HTF analysis
+        htfContext = htfSnapshots.map(htf => {
+          const analysis = JSON.parse(htf.full_analysis || "{}");
+          return `${htf.timeframe} Bias: ${analysis.market_structure?.trend_state || "unknown"}, ` +
+                 `Structure: ${analysis.market_structure?.structure_points?.join(", ") || "N/A"}, ` +
+                 `Key Levels: S${analysis.key_levels?.support_levels?.join(",") || "N/A"} / R${analysis.key_levels?.resistance_levels?.join(",") || "N/A"}`;
+        }).join("\n");
+      }
+    }
+
     const fullResult = await runFullAnalysis(
       snapshot.image_data,
       snapshot.symbol,
-      snapshot.timeframe
+      snapshot.timeframe,
+      htfContext
     );
 
     const isValidSetup = fullResult.entry_logic.valid_setup;

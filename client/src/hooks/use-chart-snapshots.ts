@@ -6,7 +6,23 @@ export interface ChartSnapshotListItem extends Omit<ChartSnapshot, "image_data">
   has_image: boolean;
 }
 
+export interface GroupSnapshotSummary {
+  id: number;
+  timeframe: string;
+  tf_type: string | null;
+  status: string;
+  pre_analysis_score: number | null;
+  pre_analysis_bias: string | null;
+  confluence_score: number | null;
+  trade_direction: string | null;
+}
+
 export interface ChartSnapshotWithParsedAnalysis extends ChartSnapshot {
+  full_analysis_parsed: FullAnalysisResult | null;
+  group_snapshots?: GroupSnapshotSummary[] | null;
+}
+
+export interface GroupedChartSnapshot extends ChartSnapshot {
   full_analysis_parsed: FullAnalysisResult | null;
 }
 
@@ -176,6 +192,36 @@ export function useMarkJournalCandidate() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
       queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+    },
+  });
+}
+
+// ==================== GROUPED SNAPSHOT HOOKS ====================
+
+export function useChartSnapshotGroup(groupId: string | null) {
+  return useQuery<GroupedChartSnapshot[]>({
+    queryKey: ["chart-snapshot-group", groupId],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/chart-snapshots/group/${groupId}`);
+      return res.json();
+    },
+    enabled: !!groupId,
+  });
+}
+
+export function useAnalyzeGroup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (groupId: string) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/group/${groupId}/analyze`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-group"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
     },
   });
 }

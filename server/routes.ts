@@ -523,6 +523,35 @@ export async function registerRoutes(
     }
   });
 
+  // GET /api/chart-snapshots/group/:groupId - Get all snapshots in a group
+  app.get("/api/chart-snapshots/group/:groupId", async (req, res) => {
+    try {
+      const { groupId } = req.params;
+      const snapshots = await storage.getChartSnapshotsByGroupId(groupId);
+
+      // Parse full_analysis JSON for each
+      const withParsedAnalysis = snapshots.map(snapshot => {
+        let parsedAnalysis = null;
+        if (snapshot.full_analysis) {
+          try {
+            parsedAnalysis = JSON.parse(snapshot.full_analysis);
+          } catch {
+            parsedAnalysis = null;
+          }
+        }
+        return {
+          ...snapshot,
+          full_analysis_parsed: parsedAnalysis,
+        };
+      });
+
+      res.json(withParsedAnalysis);
+    } catch (error) {
+      console.error("Error fetching snapshot group:", error);
+      res.status(500).json({ error: "Failed to fetch snapshot group" });
+    }
+  });
+
   // GET /api/chart-snapshots/:id - Get single snapshot with full details
   app.get("/api/chart-snapshots/:id", async (req, res) => {
     try {
@@ -543,9 +572,26 @@ export async function registerRoutes(
         }
       }
 
+      // If part of a group, include group snapshots
+      let groupSnapshots = null;
+      if (snapshot.group_id) {
+        const group = await storage.getChartSnapshotsByGroupId(snapshot.group_id);
+        groupSnapshots = group.map(s => ({
+          id: s.id,
+          timeframe: s.timeframe,
+          tf_type: s.tf_type,
+          status: s.status,
+          pre_analysis_score: s.pre_analysis_score,
+          pre_analysis_bias: s.pre_analysis_bias,
+          confluence_score: s.confluence_score,
+          trade_direction: s.trade_direction,
+        }));
+      }
+
       res.json({
         ...snapshot,
         full_analysis_parsed: parsedAnalysis,
+        group_snapshots: groupSnapshots,
       });
     } catch (error) {
       console.error("Error fetching chart snapshot:", error);
@@ -630,6 +676,54 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error analyzing chart snapshot:", error);
       res.status(500).json({ error: "Failed to analyze chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/group/:groupId/analyze - Analyze all snapshots in group (HTF first, then LTF)
+  app.post("/api/chart-snapshots/group/:groupId/analyze", async (req, res) => {
+    try {
+      const { groupId } = req.params;
+      const snapshots = await storage.getChartSnapshotsByGroupId(groupId);
+
+      if (snapshots.length === 0) {
+        return res.status(404).json({ error: "No snapshots found in group" });
+      }
+
+      // Separate HTF and LTF
+      const htfSnapshots = snapshots.filter(s => s.tf_type === "htf");
+      const ltfSnapshots = snapshots.filter(s => s.tf_type === "ltf");
+
+      const results: any[] = [];
+
+      // Analyze HTF first (for bias/structure context)
+      for (const htf of htfSnapshots) {
+        await storage.updateChartSnapshot(htf.id, { status: "approved" });
+        const analyzed = await runAndSaveFullAnalysis(htf.id);
+        if (analyzed) results.push(analyzed);
+      }
+
+      // Then analyze LTF (entry) with HTF context
+      for (const ltf of ltfSnapshots) {
+        await storage.updateChartSnapshot(ltf.id, { status: "approved" });
+        const analyzed = await runAndSaveFullAnalysis(ltf.id);
+        if (analyzed) results.push(analyzed);
+      }
+
+      res.json({
+        group_id: groupId,
+        analyzed_count: results.length,
+        snapshots: results.map(s => ({
+          id: s.id,
+          timeframe: s.timeframe,
+          tf_type: s.tf_type,
+          status: s.status,
+          confluence_score: s.confluence_score,
+          trade_direction: s.trade_direction,
+        })),
+      });
+    } catch (error) {
+      console.error("Error analyzing snapshot group:", error);
+      res.status(500).json({ error: "Failed to analyze snapshot group" });
     }
   });
 

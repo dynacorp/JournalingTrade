@@ -55,6 +55,7 @@ export interface IStorage {
     high_score_count: number;
   }>;
   autoMatchSnapshotToTrade(snapshotId: number): Promise<number | null>;
+  getChartSnapshotsByGroupId(groupId: string): Promise<ChartSnapshot[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -384,6 +385,14 @@ export class DatabaseStorage implements IStorage {
     }
 
     return null;
+  }
+
+  async getChartSnapshotsByGroupId(groupId: string): Promise<ChartSnapshot[]> {
+    return await db
+      .select()
+      .from(chartSnapshots)
+      .where(eq(chartSnapshots.group_id, groupId))
+      .orderBy(desc(chartSnapshots.timeframe)); // HTF first (H4 > H1 > M15 > M5)
   }
 }
 

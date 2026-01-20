@@ -3,11 +3,14 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
   useChartSnapshot,
+  useChartSnapshotGroup,
   useApproveSnapshot,
   useDiscardSnapshot,
   useAnalyzeSnapshot,
+  useAnalyzeGroup,
   useUpdateSnapshotNotes,
   useMarkJournalCandidate,
+  type GroupedChartSnapshot,
 } from "@/hooks/use-chart-snapshots";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -32,6 +35,9 @@ import {
   Activity,
   BarChart3,
   Zap,
+  Clock,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -50,22 +56,102 @@ const confluenceLabels = {
   candle_action_score: { label: "Candle Action", icon: AlertTriangle, weight: 10 },
 };
 
+// Helper component for group snapshot cards
+function GroupSnapshotCard({
+  snapshot,
+  isSelected,
+  onSelect,
+}: {
+  snapshot: GroupedChartSnapshot;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const score = snapshot.confluence_score ?? snapshot.pre_analysis_score ?? 0;
+  const isAnalyzed = !!snapshot.full_analysis_parsed;
+  const BiasIcon = snapshot.pre_analysis_bias === "bullish" ? TrendingUp
+    : snapshot.pre_analysis_bias === "bearish" ? TrendingDown
+    : null;
+
+  return (
+    <div
+      onClick={onSelect}
+      className={cn(
+        "p-3 rounded-lg border cursor-pointer transition-all",
+        isSelected
+          ? "border-primary bg-primary/5"
+          : "border-border hover:border-primary/50 bg-muted/30"
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="font-mono font-bold">
+            {snapshot.timeframe}
+          </Badge>
+          {isAnalyzed ? (
+            <CheckCircle className="w-4 h-4 text-emerald-500" />
+          ) : (
+            <Clock className="w-4 h-4 text-muted-foreground" />
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {BiasIcon && (
+            <BiasIcon
+              className={cn(
+                "w-4 h-4",
+                snapshot.pre_analysis_bias === "bullish" ? "text-emerald-500" : "text-red-500"
+              )}
+            />
+          )}
+          <span
+            className={cn(
+              "font-bold",
+              score >= 70 ? "text-emerald-500" :
+              score >= 50 ? "text-yellow-500" : "text-muted-foreground"
+            )}
+          >
+            {score.toFixed(0)}
+          </span>
+        </div>
+      </div>
+      {snapshot.pre_analysis_summary && (
+        <p className="text-xs text-muted-foreground mt-2 line-clamp-1">
+          {snapshot.pre_analysis_summary}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const { toast } = useToast();
   const [notes, setNotes] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
+  const [selectedGroupTf, setSelectedGroupTf] = useState<string | null>(null);
 
   const { data: snapshot, isLoading } = useChartSnapshot(snapshotId);
+  const { data: groupSnapshots } = useChartSnapshotGroup(snapshot?.group_id ?? null);
   const approveMutation = useApproveSnapshot();
   const discardMutation = useDiscardSnapshot();
   const analyzeMutation = useAnalyzeSnapshot();
+  const analyzeGroupMutation = useAnalyzeGroup();
   const updateNotesMutation = useUpdateSnapshotNotes();
   const markJournalMutation = useMarkJournalCandidate();
 
   const isActionLoading =
     approveMutation.isPending ||
     discardMutation.isPending ||
-    analyzeMutation.isPending;
+    analyzeMutation.isPending ||
+    analyzeGroupMutation.isPending;
+
+  // Get HTF and LTF snapshots from group
+  const htfSnapshots = groupSnapshots?.filter(s => s.tf_type === "htf") ?? [];
+  const ltfSnapshots = groupSnapshots?.filter(s => s.tf_type === "ltf") ?? [];
+  const hasGroup = groupSnapshots && groupSnapshots.length > 1;
+
+  // Get the currently viewed group snapshot
+  const viewedGroupSnapshot = selectedGroupTf
+    ? groupSnapshots?.find(s => s.timeframe === selectedGroupTf)
+    : null;
 
   const handleApprove = async () => {
     if (!snapshotId) return;
@@ -126,6 +212,19 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
     }
   };
 
+  const handleAnalyzeGroup = async () => {
+    if (!snapshot?.group_id) return;
+    try {
+      await analyzeGroupMutation.mutateAsync(snapshot.group_id);
+      toast({
+        title: "Group Analysis Complete",
+        description: "All timeframes in the group have been analyzed.",
+      });
+    } catch {
+      toast({ title: "Error", description: "Failed to analyze group.", variant: "destructive" });
+    }
+  };
+
   // Update notes state when snapshot loads
   if (snapshot && notes !== (snapshot.user_notes || "") && !updateNotesMutation.isPending) {
     setNotes(snapshot.user_notes || "");
@@ -165,7 +264,16 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
           <div className="flex-1 overflow-hidden flex flex-col">
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2 py-4 shrink-0">
-              {canApprove && (
+              {hasGroup ? (
+                <Button onClick={handleAnalyzeGroup} disabled={isActionLoading} size="sm">
+                  {analyzeGroupMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Layers className="w-4 h-4 mr-2" />
+                  )}
+                  Analyze All Timeframes
+                </Button>
+              ) : canApprove ? (
                 <Button onClick={handleApprove} disabled={isActionLoading} size="sm">
                   {approveMutation.isPending ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -174,8 +282,8 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                   )}
                   Approve & Analyze
                 </Button>
-              )}
-              {canReanalyze && (
+              ) : null}
+              {canReanalyze && !hasGroup && (
                 <Button onClick={handleReanalyze} disabled={isActionLoading} size="sm" variant="outline">
                   {analyzeMutation.isPending ? (
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -206,6 +314,7 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
               <TabsList className="shrink-0">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="chart">Chart</TabsTrigger>
+                {hasGroup && <TabsTrigger value="group">Group ({groupSnapshots?.length})</TabsTrigger>}
                 {isAnalyzed && <TabsTrigger value="analysis">Analysis</TabsTrigger>}
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
@@ -339,6 +448,113 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                     </div>
                   )}
                 </TabsContent>
+
+                {hasGroup && (
+                  <TabsContent value="group" className="m-0 space-y-4">
+                    {/* HTF Section - Higher Timeframes for Bias */}
+                    {htfSnapshots.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <ArrowUp className="w-4 h-4 text-blue-500" />
+                          <h4 className="font-semibold text-sm">Higher Timeframes (Bias)</h4>
+                        </div>
+                        <div className="grid gap-2">
+                          {htfSnapshots.map((gs) => (
+                            <GroupSnapshotCard
+                              key={gs.id}
+                              snapshot={gs}
+                              isSelected={selectedGroupTf === gs.timeframe}
+                              onSelect={() => setSelectedGroupTf(gs.timeframe)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LTF Section - Lower Timeframes for Entry */}
+                    {ltfSnapshots.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <ArrowDown className="w-4 h-4 text-emerald-500" />
+                          <h4 className="font-semibold text-sm">Lower Timeframes (Entry)</h4>
+                        </div>
+                        <div className="grid gap-2">
+                          {ltfSnapshots.map((gs) => (
+                            <GroupSnapshotCard
+                              key={gs.id}
+                              snapshot={gs}
+                              isSelected={selectedGroupTf === gs.timeframe}
+                              onSelect={() => setSelectedGroupTf(gs.timeframe)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Selected Timeframe Chart & Analysis */}
+                    {viewedGroupSnapshot && (
+                      <div className="space-y-4 pt-4 border-t border-border">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">{viewedGroupSnapshot.timeframe}</Badge>
+                            <Badge variant={viewedGroupSnapshot.tf_type === "htf" ? "secondary" : "default"}>
+                              {viewedGroupSnapshot.tf_type === "htf" ? "Bias" : "Entry"}
+                            </Badge>
+                          </div>
+                          {viewedGroupSnapshot.trade_direction && viewedGroupSnapshot.trade_direction !== "none" && (
+                            <Badge variant={viewedGroupSnapshot.trade_direction === "long" ? "default" : "destructive"}>
+                              {viewedGroupSnapshot.trade_direction.toUpperCase()}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Chart Image */}
+                        {viewedGroupSnapshot.image_data && (
+                          <div className="rounded-lg overflow-hidden border border-border">
+                            <img
+                              src={`data:image/png;base64,${viewedGroupSnapshot.image_data}`}
+                              alt={`${viewedGroupSnapshot.timeframe} chart`}
+                              className="w-full h-auto"
+                            />
+                          </div>
+                        )}
+
+                        {/* Analysis Summary */}
+                        {viewedGroupSnapshot.full_analysis_parsed && (
+                          <div className="space-y-2">
+                            <h5 className="text-sm font-semibold">Analysis</h5>
+                            <p className="text-sm text-muted-foreground p-3 bg-muted/50 rounded-lg">
+                              {viewedGroupSnapshot.full_analysis_parsed.overall_assessment}
+                            </p>
+                            {viewedGroupSnapshot.full_analysis_parsed.entry_logic?.valid_setup && (
+                              <div className="p-3 bg-muted/50 rounded-lg space-y-1">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span>Entry Zone</span>
+                                  <span className="font-mono">{viewedGroupSnapshot.full_analysis_parsed.entry_logic.entry_zone}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span>Invalidation</span>
+                                  <span className="font-mono">{viewedGroupSnapshot.full_analysis_parsed.entry_logic.invalidation_level}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span>Confidence</span>
+                                  <span className="font-mono">{viewedGroupSnapshot.full_analysis_parsed.entry_logic.confidence}%</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!viewedGroupSnapshot && (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Select a timeframe above to view its chart and analysis</p>
+                      </div>
+                    )}
+                  </TabsContent>
+                )}
 
                 {isAnalyzed && (
                   <TabsContent value="analysis" className="m-0 space-y-4">

@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ChartSnapshotListItem } from "@/hooks/use-chart-snapshots";
-import { TrendingUp, TrendingDown, Minus, Clock, CheckCircle, XCircle, AlertCircle, Trash2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Clock, CheckCircle, XCircle, AlertCircle, Trash2, Layers } from "lucide-react";
 
 interface SetupQueueProps {
   snapshots: ChartSnapshotListItem[];
@@ -57,9 +57,19 @@ export function SetupQueue({ snapshots, onSelectSnapshot, selectedId }: SetupQue
                   <Badge variant="secondary" className="text-xs">
                     {snapshot.timeframe}
                   </Badge>
+                  {snapshot.tf_type && (
+                    <Badge variant={snapshot.tf_type === "htf" ? "outline" : "default"} className="text-[10px] px-1.5 py-0">
+                      {snapshot.tf_type === "htf" ? "Bias" : "Entry"}
+                    </Badge>
+                  )}
                 </div>
-                <div className={cn("flex items-center gap-1", status.color)}>
-                  <StatusIcon className="w-4 h-4" />
+                <div className="flex items-center gap-1">
+                  {snapshot.group_id && (
+                    <span title="Part of MTF group">
+                      <Layers className="w-4 h-4 text-blue-500" />
+                    </span>
+                  )}
+                  <StatusIcon className={cn("w-4 h-4", status.color)} />
                 </div>
               </div>
 
