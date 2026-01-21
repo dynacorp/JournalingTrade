@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -11,9 +11,7 @@ import {
   useUpdateSnapshotNotes,
   useMarkJournalCandidate,
   useDeleteSnapshot,
-  useGenerateAnnotations,
   type GroupedChartSnapshot,
-  type ChartAnnotation,
   type TradingStyle,
 } from "@/hooks/use-chart-snapshots";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -141,19 +139,10 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const [notes, setNotes] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedGroupTf, setSelectedGroupTf] = useState<string | null>(null);
-  const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
   const [tradingStyle, setTradingStyle] = useState<TradingStyle>("daytrading");
 
   const { data: snapshot, isLoading } = useChartSnapshot(snapshotId);
 
-  // Load persisted annotations when snapshot loads
-  useEffect(() => {
-    if (snapshot?.visual_annotations_parsed) {
-      setAnnotations(snapshot.visual_annotations_parsed);
-    } else {
-      setAnnotations([]);
-    }
-  }, [snapshot?.id, snapshot?.visual_annotations_parsed]);
   const { data: groupSnapshots } = useChartSnapshotGroup(snapshot?.group_id ?? null);
   const approveMutation = useApproveSnapshot();
   const discardMutation = useDiscardSnapshot();
@@ -162,15 +151,13 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const updateNotesMutation = useUpdateSnapshotNotes();
   const markJournalMutation = useMarkJournalCandidate();
   const deleteMutation = useDeleteSnapshot();
-  const generateAnnotationsMutation = useGenerateAnnotations();
 
   const isActionLoading =
     approveMutation.isPending ||
     discardMutation.isPending ||
     analyzeMutation.isPending ||
     analyzeGroupMutation.isPending ||
-    deleteMutation.isPending ||
-    generateAnnotationsMutation.isPending;
+    deleteMutation.isPending;
 
   // Get HTF and LTF snapshots from group
   const htfSnapshots = groupSnapshots?.filter(s => s.tf_type === "htf") ?? [];
@@ -263,22 +250,6 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
       onClose();
     } catch {
       toast({ title: "Error", description: "Failed to delete setup.", variant: "destructive" });
-    }
-  };
-
-  const handleGenerateAnnotations = async (force = false) => {
-    if (!snapshotId) return;
-    try {
-      const result = await generateAnnotationsMutation.mutateAsync({ snapshotId, force, tradingStyle });
-      setAnnotations(result.annotations);
-      toast({
-        title: result.cached ? "Breakdown Loaded" : "Breakdown Generated",
-        description: result.cached
-          ? `${result.annotations.length} annotations loaded from cache.`
-          : `${result.annotations.length} annotations added for ${tradingStyle === "daytrading" ? "day trading" : "swing trading"}.`,
-      });
-    } catch {
-      toast({ title: "Error", description: "Failed to generate chart breakdown.", variant: "destructive" });
     }
   };
 
@@ -691,45 +662,171 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                   </TabsContent>
                 )}
 
-                {/* Deep Analysis Tab with AI-Generated Visual Breakdown */}
+                {/* Chart Breakdown Tab - Shows chart with comprehensive text analysis */}
                 {snapshot.image_data && (
                   <TabsContent value="deep" className="m-0 space-y-4">
-                    {/* Visual Annotations - AI analyzes the chart image directly */}
-                    <VisualAnnotations
-                      imageData={snapshot.image_data}
-                      annotations={annotations}
-                      isLoading={generateAnnotationsMutation.isPending}
-                      onGenerateAnnotations={() => handleGenerateAnnotations(false)}
-                      onRegenerateAnnotations={() => handleGenerateAnnotations(true)}
-                    />
+                    {/* Chart Image with zoom/fullscreen capability */}
+                    <VisualAnnotations imageData={snapshot.image_data} />
 
-                    {/* Quick Analysis Summary - if analysis exists */}
-                    {isAnalyzed && analysis && (
-                      <div className="p-3 bg-muted/50 rounded-lg space-y-2 border border-border">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold">Analysis Summary</span>
-                          <Badge variant={analysis.entry_logic.valid_setup ? "default" : "secondary"}>
-                            {analysis.entry_logic.valid_setup
-                              ? `${analysis.entry_logic.trade_direction?.toUpperCase()} @ ${analysis.entry_logic.confidence}%`
-                              : "No Setup"}
-                          </Badge>
+                    {/* Comprehensive AI Analysis - Text-Based */}
+                    {isAnalyzed && analysis ? (
+                      <div className="space-y-4">
+                        {/* Direction & Confidence Header */}
+                        <div className="p-4 bg-gradient-to-r from-muted/80 to-muted/40 rounded-lg border border-border">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-lg font-bold">AI Analysis</span>
+                            <Badge
+                              variant={analysis.entry_logic.valid_setup ? "default" : "secondary"}
+                              className={cn(
+                                "text-sm px-3 py-1",
+                                analysis.entry_logic.trade_direction === "long" && "bg-emerald-600",
+                                analysis.entry_logic.trade_direction === "short" && "bg-red-600"
+                              )}
+                            >
+                              {analysis.entry_logic.valid_setup
+                                ? `${analysis.entry_logic.trade_direction?.toUpperCase()} - ${analysis.entry_logic.confidence}% Confidence`
+                                : "No Valid Setup"}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground">{analysis.overall_assessment}</p>
                         </div>
-                        <p className="text-xs text-muted-foreground">{analysis.overall_assessment}</p>
+
+                        {/* Entry Logic Details */}
                         {analysis.entry_logic.valid_setup && (
-                          <div className="flex flex-wrap gap-2 pt-2 border-t border-border/50">
-                            <Badge variant="outline" className="text-xs">
-                              Entry: {analysis.entry_logic.entry_zone}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs text-red-500 border-red-500/30">
-                              SL: {analysis.entry_logic.invalidation_level}
-                            </Badge>
-                            {analysis.entry_logic.targets.map((t, i) => (
-                              <Badge key={i} variant="outline" className="text-xs text-emerald-500 border-emerald-500/30">
-                                TP{i + 1}: {t}
-                              </Badge>
-                            ))}
+                          <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
+                            <h4 className="font-semibold flex items-center gap-2">
+                              <Target className="w-4 h-4 text-primary" />
+                              Entry Logic
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div className="p-2 bg-emerald-500/10 rounded border border-emerald-500/20">
+                                <span className="text-muted-foreground block text-xs">Entry Zone</span>
+                                <span className="font-mono font-bold text-emerald-600">{analysis.entry_logic.entry_zone}</span>
+                              </div>
+                              <div className="p-2 bg-red-500/10 rounded border border-red-500/20">
+                                <span className="text-muted-foreground block text-xs">Stop Loss</span>
+                                <span className="font-mono font-bold text-red-600">{analysis.entry_logic.invalidation_level}</span>
+                              </div>
+                            </div>
+                            {analysis.entry_logic.targets.length > 0 && (
+                              <div className="space-y-1">
+                                <span className="text-xs text-muted-foreground">Take Profit Targets</span>
+                                <div className="flex flex-wrap gap-2">
+                                  {analysis.entry_logic.targets.map((target, i) => (
+                                    <Badge key={i} variant="outline" className="font-mono text-emerald-600 border-emerald-500/30">
+                                      TP{i + 1}: {target}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
+
+                        {/* Market Structure */}
+                        <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
+                          <h4 className="font-semibold flex items-center gap-2">
+                            <Layers className="w-4 h-4 text-blue-500" />
+                            Market Structure
+                          </h4>
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            <Badge variant="outline">{analysis.market_structure.trend_state}</Badge>
+                            {analysis.market_structure.bos_detected && <Badge className="bg-blue-600">BOS Detected</Badge>}
+                            {analysis.market_structure.choch_detected && <Badge className="bg-purple-600">CHOCH Detected</Badge>}
+                          </div>
+                          {analysis.market_structure.structure_points.length > 0 && (
+                            <div className="text-sm text-muted-foreground">
+                              <span className="font-medium">Structure Points: </span>
+                              {analysis.market_structure.structure_points.join(" → ")}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Key Levels */}
+                        {(analysis.key_levels.support_levels.length > 0 || analysis.key_levels.resistance_levels.length > 0) && (
+                          <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
+                            <h4 className="font-semibold flex items-center gap-2">
+                              <BarChart3 className="w-4 h-4 text-yellow-500" />
+                              Key Levels
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="text-xs text-muted-foreground block mb-1">Support Levels</span>
+                                <div className="space-y-1">
+                                  {analysis.key_levels.support_levels.map((level, i) => (
+                                    <div key={i} className="font-mono text-emerald-600 text-sm">{level}</div>
+                                  ))}
+                                  {analysis.key_levels.support_levels.length === 0 && (
+                                    <span className="text-muted-foreground text-xs">None identified</span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <span className="text-xs text-muted-foreground block mb-1">Resistance Levels</span>
+                                <div className="space-y-1">
+                                  {analysis.key_levels.resistance_levels.map((level, i) => (
+                                    <div key={i} className="font-mono text-red-600 text-sm">{level}</div>
+                                  ))}
+                                  {analysis.key_levels.resistance_levels.length === 0 && (
+                                    <span className="text-muted-foreground text-xs">None identified</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Liquidity Analysis */}
+                        {(analysis.liquidity.equal_highs.length > 0 || analysis.liquidity.equal_lows.length > 0 || analysis.liquidity.sweep_occurred) && (
+                          <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
+                            <h4 className="font-semibold flex items-center gap-2">
+                              <Activity className="w-4 h-4 text-orange-500" />
+                              Liquidity Analysis
+                            </h4>
+                            <div className="space-y-2 text-sm">
+                              {analysis.liquidity.equal_highs.length > 0 && (
+                                <div>
+                                  <span className="text-muted-foreground">Equal Highs: </span>
+                                  <span className="font-mono text-orange-500">{analysis.liquidity.equal_highs.join(", ")}</span>
+                                </div>
+                              )}
+                              {analysis.liquidity.equal_lows.length > 0 && (
+                                <div>
+                                  <span className="text-muted-foreground">Equal Lows: </span>
+                                  <span className="font-mono text-cyan-500">{analysis.liquidity.equal_lows.join(", ")}</span>
+                                </div>
+                              )}
+                              {analysis.liquidity.sweep_occurred && (
+                                <Badge className="bg-orange-600">Liquidity Sweep Detected</Badge>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Confluences List */}
+                        {analysis.entry_logic.confluence_list && analysis.entry_logic.confluence_list.length > 0 && (
+                          <div className="p-4 bg-muted/30 rounded-lg border border-border space-y-3">
+                            <h4 className="font-semibold flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 text-emerald-500" />
+                              Trade Confluences
+                            </h4>
+                            <ul className="space-y-2">
+                              {analysis.entry_logic.confluence_list.map((conf, i) => (
+                                <li key={i} className="flex items-start gap-2 text-sm">
+                                  <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                                  <span>{conf}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center bg-muted/30 rounded-lg border border-dashed border-border">
+                        <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-muted-foreground/50" />
+                        <p className="text-sm text-muted-foreground">
+                          No analysis available yet. Click "Analyze All Timeframes" to generate AI analysis.
+                        </p>
                       </div>
                     )}
                   </TabsContent>

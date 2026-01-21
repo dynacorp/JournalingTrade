@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertTradeSchema, insertMT5AccountSchema, ingestChartSnapshotSchema, type ChartSnapshotStatus } from "@shared/schema";
 import { generateTradeAnalysis, generateWeeklyAnalysis } from "./openai";
-import { processSnapshot, runAndSaveFullAnalysis, generateChartAnnotations, type TradingStyle } from "./chart-analysis";
+import { processSnapshot, runAndSaveFullAnalysis, type TradingStyle } from "./chart-analysis";
 import { fromZodError } from "zod-validation-error";
 import { startOfWeek, endOfWeek, subWeeks, isSunday } from "date-fns";
 
@@ -554,18 +554,9 @@ export async function registerRoutes(
             parsedAnalysis = null;
           }
         }
-        let parsedAnnotations = null;
-        if (snapshot.visual_annotations) {
-          try {
-            parsedAnnotations = JSON.parse(snapshot.visual_annotations);
-          } catch {
-            parsedAnnotations = null;
-          }
-        }
         return {
           ...snapshot,
           full_analysis_parsed: parsedAnalysis,
-          visual_annotations_parsed: parsedAnnotations,
         };
       });
 
@@ -596,16 +587,6 @@ export async function registerRoutes(
         }
       }
 
-      // Parse visual_annotations JSON if present
-      let parsedAnnotations = null;
-      if (snapshot.visual_annotations) {
-        try {
-          parsedAnnotations = JSON.parse(snapshot.visual_annotations);
-        } catch {
-          parsedAnnotations = null;
-        }
-      }
-
       // If part of a group, include group snapshots
       let groupSnapshots = null;
       if (snapshot.group_id) {
@@ -625,7 +606,6 @@ export async function registerRoutes(
       res.json({
         ...snapshot,
         full_analysis_parsed: parsedAnalysis,
-        visual_annotations_parsed: parsedAnnotations,
         group_snapshots: groupSnapshots,
       });
     } catch (error) {
@@ -715,81 +695,6 @@ export async function registerRoutes(
     }
   });
 
-  // POST /api/chart-snapshots/:id/annotate - Generate visual annotations for a chart
-  app.post("/api/chart-snapshots/:id/annotate", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { force, tradingStyle } = req.body as { force?: boolean; tradingStyle?: TradingStyle };
-      const snapshot = await storage.getChartSnapshot(id);
-
-      if (!snapshot) {
-        return res.status(404).json({ error: "Snapshot not found" });
-      }
-
-      // Check if we already have annotations and not forcing regeneration
-      if (snapshot.visual_annotations && !force) {
-        try {
-          const existingAnnotations = JSON.parse(snapshot.visual_annotations);
-          return res.json({
-            snapshot_id: id,
-            symbol: snapshot.symbol,
-            timeframe: snapshot.timeframe,
-            annotations: existingAnnotations,
-            summary: "Loaded from cache",
-            cached: true,
-          });
-        } catch (e) {
-          // If parsing fails, regenerate
-        }
-      }
-
-      // Parse existing analysis if available
-      let existingAnalysis = undefined;
-      if (snapshot.full_analysis) {
-        try {
-          existingAnalysis = JSON.parse(snapshot.full_analysis);
-        } catch (e) {
-          // Ignore parsing errors
-        }
-      }
-
-      // Build price context from snapshot
-      const priceContext = {
-        price_high: snapshot.price_high,
-        price_low: snapshot.price_low,
-        current_price: snapshot.current_price,
-        visible_bars: snapshot.visible_bars,
-      };
-
-      // Generate visual annotations with price context
-      const annotations = await generateChartAnnotations(
-        snapshot.image_data,
-        snapshot.symbol,
-        snapshot.timeframe,
-        existingAnalysis,
-        priceContext,
-        tradingStyle || "daytrading"
-      );
-
-      // Persist the annotations to the database
-      await storage.updateChartSnapshot(id, {
-        visual_annotations: JSON.stringify(annotations.annotations),
-        visual_annotations_at: new Date(),
-      });
-
-      res.json({
-        snapshot_id: id,
-        symbol: snapshot.symbol,
-        timeframe: snapshot.timeframe,
-        ...annotations,
-        cached: false,
-      });
-    } catch (error) {
-      console.error("Error generating chart annotations:", error);
-      res.status(500).json({ error: "Failed to generate chart annotations" });
-    }
-  });
-
   // POST /api/chart-snapshots/group/:groupId/analyze - Analyze all snapshots in group (HTF first, then LTF)
   app.post("/api/chart-snapshots/group/:groupId/analyze", async (req, res) => {
     try {
@@ -822,53 +727,7 @@ export async function registerRoutes(
         if (analyzed) results.push(analyzed);
       }
 
-      // Generate visual annotations for ALL timeframes in the group
-      for (const snapshot of [...htfSnapshots, ...ltfSnapshots]) {
-        try {
-          // Get the updated snapshot with full analysis
-          const updatedSnapshot = await storage.getChartSnapshot(snapshot.id);
-          if (!updatedSnapshot) continue;
-
-          // Parse existing analysis if available
-          let existingAnalysis = undefined;
-          if (updatedSnapshot.full_analysis) {
-            try {
-              existingAnalysis = JSON.parse(updatedSnapshot.full_analysis);
-            } catch (e) {
-              // Ignore parsing errors
-            }
-          }
-
-          // Build price context from snapshot
-          const priceContext = {
-            price_high: updatedSnapshot.price_high,
-            price_low: updatedSnapshot.price_low,
-            current_price: updatedSnapshot.current_price,
-            visible_bars: updatedSnapshot.visible_bars,
-          };
-
-          // Generate visual annotations with price context and trading style
-          const annotations = await generateChartAnnotations(
-            updatedSnapshot.image_data,
-            updatedSnapshot.symbol,
-            updatedSnapshot.timeframe,
-            existingAnalysis,
-            priceContext,
-            selectedStyle
-          );
-
-          // Persist annotations
-          await storage.updateChartSnapshot(snapshot.id, {
-            visual_annotations: JSON.stringify(annotations.annotations),
-            visual_annotations_at: new Date(),
-          });
-        } catch (annotationError) {
-          console.error(`Error generating annotations for snapshot ${snapshot.id}:`, annotationError);
-          // Continue with other snapshots even if one fails
-        }
-      }
-
-      // Get updated results with annotations
+      // Get updated results
       const finalResults = await storage.getChartSnapshotsByGroupId(groupId);
 
       res.json({
@@ -881,7 +740,6 @@ export async function registerRoutes(
           status: s.status,
           confluence_score: s.confluence_score,
           trade_direction: s.trade_direction,
-          has_annotations: !!s.visual_annotations,
         })),
       });
     } catch (error) {

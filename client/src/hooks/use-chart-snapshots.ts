@@ -22,12 +22,10 @@ export interface GroupSnapshotSummary {
 export interface ChartSnapshotWithParsedAnalysis extends ChartSnapshot {
   full_analysis_parsed: FullAnalysisResult | null;
   group_snapshots?: GroupSnapshotSummary[] | null;
-  visual_annotations_parsed?: ChartAnnotation[] | null;
 }
 
 export interface GroupedChartSnapshot extends ChartSnapshot {
   full_analysis_parsed: FullAnalysisResult | null;
-  visual_annotations_parsed?: ChartAnnotation[] | null;
 }
 
 interface ChartSnapshotFilters {
@@ -277,40 +275,3 @@ export function useDeleteAllSnapshots() {
   });
 }
 
-// ==================== CHART ANNOTATION HOOKS ====================
-
-export interface ChartAnnotation {
-  id: string;
-  label: string;
-  description: string;
-  type: "entry" | "target" | "support" | "resistance" | "bos" | "choch" | "liquidity" | "fvg" | "orderblock" | "sweep";
-  x: number;
-  y: number;
-  lineY?: number;
-  price?: number;
-  color: string;
-}
-
-export interface ChartAnnotationResult {
-  snapshot_id: number;
-  symbol: string;
-  timeframe: string;
-  annotations: ChartAnnotation[];
-  summary: string;
-  cached?: boolean;
-}
-
-export function useGenerateAnnotations() {
-  const queryClient = useQueryClient();
-
-  return useMutation<ChartAnnotationResult, Error, { snapshotId: number; force?: boolean; tradingStyle?: TradingStyle }>({
-    mutationFn: async ({ snapshotId, force, tradingStyle }) => {
-      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/annotate`, { force, tradingStyle });
-      return res.json();
-    },
-    onSuccess: (_, { snapshotId }) => {
-      queryClient.invalidateQueries({ queryKey: ["chart-snapshot", snapshotId] });
-      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-group"] });
-    },
-  });
-}
