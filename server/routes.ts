@@ -752,12 +752,21 @@ export async function registerRoutes(
         }
       }
 
-      // Generate visual annotations
+      // Build price context from snapshot
+      const priceContext = {
+        price_high: snapshot.price_high,
+        price_low: snapshot.price_low,
+        current_price: snapshot.current_price,
+        visible_bars: snapshot.visible_bars,
+      };
+
+      // Generate visual annotations with price context
       const annotations = await generateChartAnnotations(
         snapshot.image_data,
         snapshot.symbol,
         snapshot.timeframe,
-        existingAnalysis
+        existingAnalysis,
+        priceContext
       );
 
       // Persist the annotations to the database
@@ -826,12 +835,21 @@ export async function registerRoutes(
             }
           }
 
-          // Generate visual annotations
+          // Build price context from snapshot
+          const priceContext = {
+            price_high: updatedSnapshot.price_high,
+            price_low: updatedSnapshot.price_low,
+            current_price: updatedSnapshot.current_price,
+            visible_bars: updatedSnapshot.visible_bars,
+          };
+
+          // Generate visual annotations with price context
           const annotations = await generateChartAnnotations(
             updatedSnapshot.image_data,
             updatedSnapshot.symbol,
             updatedSnapshot.timeframe,
-            existingAnalysis
+            existingAnalysis,
+            priceContext
           );
 
           // Persist annotations

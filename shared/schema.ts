@@ -146,6 +146,12 @@ export const chartSnapshots = pgTable("chart_snapshots", {
   // Image Storage (Base64)
   image_data: text("image_data").notNull(),
 
+  // Price Context from MT5 (for accurate AI analysis)
+  price_high: real("price_high"),       // Highest price visible on chart
+  price_low: real("price_low"),         // Lowest price visible on chart
+  current_price: real("current_price"), // Current bid price at capture
+  visible_bars: integer("visible_bars"), // Number of bars visible on chart
+
   // Status: pending | pre_analyzed | queued_for_review | approved | analyzed | discarded | no_setup
   status: varchar("status", { length: 20 }).notNull().default("pending"),
 
@@ -287,6 +293,11 @@ export const ingestChartSnapshotSchema = z.object({
   image_data: z.string().min(1),
   group_id: z.string().max(100).optional(),
   tf_type: z.enum(["htf", "ltf"]).optional(),
+  // Price context from MT5 for accurate AI analysis
+  price_high: z.number().optional(),
+  price_low: z.number().optional(),
+  current_price: z.number().optional(),
+  visible_bars: z.number().int().optional(),
 });
 
 export type InsertChartSnapshot = z.infer<typeof insertChartSnapshotSchema>;

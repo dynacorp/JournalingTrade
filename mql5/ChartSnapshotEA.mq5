@@ -311,6 +311,17 @@ void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
    ChartRedraw(chartId);
    Sleep(500);
 
+   //--- Get the visible price range from the chart
+   double priceHigh = ChartGetDouble(chartId, CHART_PRICE_MAX);
+   double priceLow = ChartGetDouble(chartId, CHART_PRICE_MIN);
+
+   //--- Get current price for reference
+   double currentPrice = SymbolInfoDouble(symbol, SYMBOL_BID);
+
+   //--- Get visible bar range for context
+   int visibleBars = (int)ChartGetInteger(chartId, CHART_VISIBLE_BARS);
+   int firstVisibleBar = (int)ChartGetInteger(chartId, CHART_FIRST_VISIBLE_BAR);
+
    //--- Generate snapshot ID based on symbol + timeframe + candle time (for upsert)
    string snapshotId = GenerateSnapshotId(symbol, tfString, candleTime);
 
@@ -332,12 +343,14 @@ void CaptureTimeframe(string symbol, ENUM_TIMEFRAMES tf, string tfString,
       return;
    }
 
-   //--- Build and send
-   string json = BuildJsonPayload(snapshotId, symbol, tfString, base64Data, groupId, tfType, candleTime);
+   //--- Build and send (now with price data)
+   string json = BuildJsonPayload(snapshotId, symbol, tfString, base64Data, groupId, tfType, candleTime,
+                                   priceHigh, priceLow, currentPrice, visibleBars);
 
    if(SendToServer(json))
    {
-      Print("Sent: ", symbol, " ", tfString, " (", tfType, ") candle: ", TimeToString(candleTime));
+      Print("Sent: ", symbol, " ", tfString, " (", tfType, ") candle: ", TimeToString(candleTime),
+            " Price range: ", DoubleToString(priceLow, _Digits), " - ", DoubleToString(priceHigh, _Digits));
    }
    else
    {
@@ -412,7 +425,8 @@ string FileToBase64(string filename)
 //| Build JSON payload for API                                         |
 //+------------------------------------------------------------------+
 string BuildJsonPayload(string snapshotId, string symbol, string timeframe,
-                        string imageBase64, string groupId, string tfType, datetime candleTime)
+                        string imageBase64, string groupId, string tfType, datetime candleTime,
+                        double priceHigh, double priceLow, double currentPrice, int visibleBars)
 {
    //--- Current timestamp in ISO format
    string timestamp = TimeToString(TimeCurrent(), TIME_DATE | TIME_SECONDS);
@@ -433,7 +447,13 @@ string BuildJsonPayload(string snapshotId, string symbol, string timeframe,
    json += "\"timeframe\":\"" + timeframe + "\",";
    json += "\"snapshot_time\":\"" + timestamp + "\",";
    json += "\"candle_time\":\"" + candleTimeStr + "\",";
-   json += "\"image_data\":\"" + imageBase64 + "\"";
+   json += "\"image_data\":\"" + imageBase64 + "\",";
+
+   //--- Add price context (critical for AI analysis)
+   json += "\"price_high\":" + DoubleToString(priceHigh, _Digits) + ",";
+   json += "\"price_low\":" + DoubleToString(priceLow, _Digits) + ",";
+   json += "\"current_price\":" + DoubleToString(currentPrice, _Digits) + ",";
+   json += "\"visible_bars\":" + IntegerToString(visibleBars);
 
    //--- Add group info if present
    if(StringLen(groupId) > 0)

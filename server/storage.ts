@@ -458,6 +458,11 @@ export class DatabaseStorage implements IStorage {
           candle_time: snapshotWithDates.candle_time,
           group_id: snapshotWithDates.group_id || existingById[0].group_id,
           tf_type: snapshotWithDates.tf_type || existingById[0].tf_type,
+          // Update price context
+          price_high: snapshotWithDates.price_high,
+          price_low: snapshotWithDates.price_low,
+          current_price: snapshotWithDates.current_price,
+          visible_bars: snapshotWithDates.visible_bars,
         })
         .where(eq(chartSnapshots.id, existingById[0].id))
         .returning();
@@ -494,6 +499,11 @@ export class DatabaseStorage implements IStorage {
           candle_time: snapshotWithDates.candle_time,
           group_id: snapshotWithDates.group_id || existingBySymbolTf[0].group_id,
           tf_type: snapshotWithDates.tf_type || existingBySymbolTf[0].tf_type,
+          // Update price context
+          price_high: snapshotWithDates.price_high,
+          price_low: snapshotWithDates.price_low,
+          current_price: snapshotWithDates.current_price,
+          visible_bars: snapshotWithDates.visible_bars,
           // Reset analysis since image changed
           status: "pending",
           pre_analysis_score: null,

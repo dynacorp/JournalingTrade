@@ -91,14 +91,38 @@ Respond with JSON only:
   }
 }
 
+// Price context from MT5 for accurate analysis
+export interface PriceContext {
+  price_high: number | null;
+  price_low: number | null;
+  current_price: number | null;
+  visible_bars: number | null;
+}
+
 export async function runFullAnalysis(
   imageBase64: string,
   symbol: string,
   timeframe: string,
-  htfContext?: string
+  htfContext?: string,
+  priceContext?: PriceContext
 ): Promise<FullAnalysisResult> {
   try {
+    // Build price context info for the prompt
+    const priceInfo = priceContext && priceContext.price_high && priceContext.price_low
+      ? `
+## EXACT PRICE RANGE (FROM MT5 - USE THESE VALUES)
+- Chart High: ${priceContext.price_high}
+- Chart Low: ${priceContext.price_low}
+- Current Price: ${priceContext.current_price || "N/A"}
+- Visible Bars: ${priceContext.visible_bars || "N/A"}
+
+CRITICAL: Use these exact prices for your analysis. The chart shows prices from ${priceContext.price_low} to ${priceContext.price_high}.
+When identifying levels, ensure they fall within this range.
+`
+      : "";
+
     const systemPrompt = `You are a MASTER institutional price action analyst. Your analysis determines real money decisions - treat this with absolute seriousness. You must be BRUTALLY HONEST. If there is no clear setup, say so. NEVER force or fabricate a trade.
+${priceInfo}
 
 ## YOUR MANDATE
 - Analyze with the precision of a surgeon and the skepticism of a prosecutor
@@ -426,9 +450,32 @@ export async function generateChartAnnotations(
   imageBase64: string,
   symbol: string,
   timeframe: string,
-  existingAnalysis?: FullAnalysisResult
+  existingAnalysis?: FullAnalysisResult,
+  priceContext?: PriceContext
 ): Promise<ChartAnnotationResult> {
   try {
+    // Build price context for accurate annotation positioning
+    const priceRangeInfo = priceContext && priceContext.price_high && priceContext.price_low
+      ? `
+═══════════════════════════════════════════════════════════════
+EXACT PRICE RANGE (FROM MT5 - CRITICAL FOR POSITIONING)
+═══════════════════════════════════════════════════════════════
+• Chart High (y=0%): ${priceContext.price_high}
+• Chart Low (y=100%): ${priceContext.price_low}
+• Current Price: ${priceContext.current_price || "N/A"}
+• Price Range: ${(priceContext.price_high - priceContext.price_low).toFixed(5)}
+
+TO CALCULATE Y-COORDINATE FROM PRICE:
+y = ((price_high - YOUR_PRICE) / (price_high - price_low)) * 100
+
+Example: If price_high=${priceContext.price_high}, price_low=${priceContext.price_low}
+- A level at ${priceContext.price_high} would be y=0
+- A level at ${priceContext.price_low} would be y=100
+- A level at ${((priceContext.price_high + priceContext.price_low) / 2).toFixed(5)} would be y=50
+═══════════════════════════════════════════════════════════════
+`
+      : "";
+
     const analysisContext = existingAnalysis ? `
 ═══════════════════════════════════════════════════════════════
 EXISTING ANALYSIS DATA - USE THIS TO GUIDE YOUR ANNOTATIONS
@@ -633,11 +680,11 @@ CRITICAL REMINDERS
               text: `ANALYZE THIS ${symbol} ${timeframe} CHART WITH SURGICAL PRECISION.
 
 Your annotations will be displayed directly on this chart for trading decisions.
-
+${priceRangeInfo}
 ${analysisContext}
 
 INSTRUCTIONS:
-1. First, carefully READ THE PRICE AXIS on the right side to understand price levels
+1. USE THE PROVIDED PRICE RANGE to calculate y-coordinates accurately
 2. Identify ALL visible market structure (BOS, CHOCH, swing points)
 3. Mark ALL clear support and resistance levels with exact prices
 4. Identify any liquidity pools (equal highs/lows) and note if swept
@@ -645,11 +692,14 @@ INSTRUCTIONS:
 6. Mark any unfilled fair value gaps
 7. ONLY if a valid setup exists, mark entry, invalidation, and targets
 
+Y-COORDINATE FORMULA (USE THIS):
+y = ((price_high - level_price) / (price_high - price_low)) * 100
+
 CRITICAL QUALITY CHECKS BEFORE RESPONDING:
-□ Did I read the price axis correctly?
-□ Are my y-coordinates correct? (lower y = higher price)
+□ Did I use the provided price range for y-calculations?
+□ Are my y-coordinates correct? (higher prices = lower y-values)
 □ Do I have lineY for all horizontal levels?
-□ Are prices accurate to what's visible on chart?
+□ Are prices within the provided range?
 □ If no valid setup, did I avoid annotating entry/targets?
 
 Provide PROFESSIONAL-GRADE annotations. This is life or death for capital.`
@@ -716,11 +766,20 @@ export async function runAndSaveFullAnalysis(snapshotId: number): Promise<ChartS
       }
     }
 
+    // Build price context from snapshot
+    const priceContext: PriceContext = {
+      price_high: snapshot.price_high,
+      price_low: snapshot.price_low,
+      current_price: snapshot.current_price,
+      visible_bars: snapshot.visible_bars,
+    };
+
     const fullResult = await runFullAnalysis(
       snapshot.image_data,
       snapshot.symbol,
       snapshot.timeframe,
-      htfContext
+      htfContext,
+      priceContext
     );
 
     const isValidSetup = fullResult.entry_logic.valid_setup;
