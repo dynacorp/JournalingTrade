@@ -818,25 +818,8 @@ export async function registerRoutes(
     }
   });
 
-  // DELETE /api/chart-snapshots/:id - Delete a single snapshot
-  app.delete("/api/chart-snapshots/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-
-      const deleted = await storage.deleteChartSnapshot(id);
-
-      if (!deleted) {
-        return res.status(404).json({ error: "Snapshot not found" });
-      }
-
-      res.json({ success: true, message: "Snapshot deleted" });
-    } catch (error) {
-      console.error("Error deleting chart snapshot:", error);
-      res.status(500).json({ error: "Failed to delete chart snapshot" });
-    }
-  });
-
   // DELETE /api/chart-snapshots - Delete all snapshots (with optional filters)
+  // NOTE: This route MUST come before /:id route to avoid matching issues
   app.delete("/api/chart-snapshots", async (req, res) => {
     try {
       const { status, symbol, timeframe } = req.query;
@@ -859,6 +842,24 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting chart snapshots:", error);
       res.status(500).json({ error: "Failed to delete chart snapshots" });
+    }
+  });
+
+  // DELETE /api/chart-snapshots/:id - Delete a single snapshot
+  app.delete("/api/chart-snapshots/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+
+      const deleted = await storage.deleteChartSnapshot(id);
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      res.json({ success: true, message: "Snapshot deleted" });
+    } catch (error) {
+      console.error("Error deleting chart snapshot:", error);
+      res.status(500).json({ error: "Failed to delete chart snapshot" });
     }
   });
 

@@ -58,7 +58,8 @@ export default function Setups() {
         description: `Successfully deleted ${result.deleted_count} snapshot(s).`,
       });
       setSelectedSnapshot(null);
-    } catch {
+    } catch (error) {
+      console.error("Delete all error:", error);
       toast({
         title: "Error",
         description: "Failed to delete snapshots.",

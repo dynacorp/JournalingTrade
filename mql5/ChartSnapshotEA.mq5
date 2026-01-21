@@ -5,8 +5,13 @@
 //+------------------------------------------------------------------+
 #property copyright "TradeMind"
 #property link      ""
-#property version   "3.00"
+#property version   "3.10"
 #property strict
+
+//--- Button constants
+#define BUTTON_NAME     "TradeMind_CaptureBtn"
+#define BUTTON_WIDTH    120
+#define BUTTON_HEIGHT   30
 
 //--- Input parameters
 input string   InpServerURL = "http://localhost:3000";     // Server URL
@@ -19,6 +24,11 @@ input bool     InpShowIndicators = true;                    // Include indicator
 input string   InpHTFTimeframes = "H1,H4";                  // Higher Timeframes (bias/structure)
 input string   InpLTFTimeframes = "M5,M15";                 // Lower Timeframes (entry)
 input bool     InpGroupedCapture = true;                    // Capture all TFs together as group
+
+//--- UI settings
+input bool     InpShowButton = true;                        // Show manual capture button
+input int      InpButtonX = 20;                             // Button X position (from left)
+input int      InpButtonY = 50;                             // Button Y position (from top)
 
 //--- Global variables
 string   g_htfTimeframes[];
@@ -84,12 +94,20 @@ int OnInit()
       idx++;
    }
 
-   Print("ChartSnapshotEA v3.0 initialized - Candle Close Mode");
+   //--- Create manual capture button if enabled
+   if(InpShowButton)
+   {
+      CreateCaptureButton();
+   }
+
+   Print("ChartSnapshotEA v3.1 initialized - Candle Close Mode");
    Print("Server: ", InpServerURL);
    Print("HTF (bias): ", InpHTFTimeframes);
    Print("LTF (entry): ", InpLTFTimeframes);
    Print("Grouped capture: ", InpGroupedCapture ? "Yes" : "No");
    Print("Captures only on candle close for each timeframe");
+   if(InpShowButton)
+      Print("Manual capture button enabled - click to capture anytime");
 
    return INIT_SUCCEEDED;
 }
@@ -99,7 +117,32 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   //--- Remove button from chart
+   ObjectDelete(0, BUTTON_NAME);
    Print("ChartSnapshotEA deinitialized");
+}
+
+//+------------------------------------------------------------------+
+//| Chart event handler (for button clicks)                            |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
+{
+   //--- Handle button click
+   if(id == CHARTEVENT_OBJECT_CLICK)
+   {
+      if(sparam == BUTTON_NAME)
+      {
+         //--- Reset button state (unpress it)
+         ObjectSetInteger(0, BUTTON_NAME, OBJPROP_STATE, false);
+         ChartRedraw();
+
+         Print("Manual capture triggered via button");
+         ManualCapture();
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -525,10 +568,63 @@ ENUM_TIMEFRAMES StringToTimeframe(string tf)
 }
 
 //+------------------------------------------------------------------+
+//| Create the manual capture button on chart                          |
+//+------------------------------------------------------------------+
+void CreateCaptureButton()
+{
+   long chartId = ChartID();
+
+   //--- Delete existing button if any
+   ObjectDelete(chartId, BUTTON_NAME);
+
+   //--- Create button object
+   if(!ObjectCreate(chartId, BUTTON_NAME, OBJ_BUTTON, 0, 0, 0))
+   {
+      Print("ERROR: Failed to create capture button. Error: ", GetLastError());
+      return;
+   }
+
+   //--- Set button properties
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_XDISTANCE, InpButtonX);
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_YDISTANCE, InpButtonY);
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_XSIZE, BUTTON_WIDTH);
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_YSIZE, BUTTON_HEIGHT);
+
+   //--- Button text
+   ObjectSetString(chartId, BUTTON_NAME, OBJPROP_TEXT, "📷 Capture");
+
+   //--- Button colors (modern look)
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_COLOR, clrWhite);           // Text color
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_BGCOLOR, clrDodgerBlue);    // Background
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_BORDER_COLOR, clrRoyalBlue); // Border
+
+   //--- Font settings
+   ObjectSetString(chartId, BUTTON_NAME, OBJPROP_FONT, "Arial Bold");
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_FONTSIZE, 10);
+
+   //--- Make sure button is visible and clickable
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_HIDDEN, true);  // Hide from object list
+   ObjectSetInteger(chartId, BUTTON_NAME, OBJPROP_ZORDER, 1000);  // Bring to front
+
+   ChartRedraw(chartId);
+   Print("Capture button created at position (", InpButtonX, ", ", InpButtonY, ")");
+}
+
+//+------------------------------------------------------------------+
 //| Manual capture function (can be called from button/hotkey)         |
 //+------------------------------------------------------------------+
 void ManualCapture()
 {
+   //--- Show capturing state on button
+   if(InpShowButton)
+   {
+      ObjectSetString(0, BUTTON_NAME, OBJPROP_TEXT, "⏳ Capturing...");
+      ObjectSetInteger(0, BUTTON_NAME, OBJPROP_BGCOLOR, clrGray);
+      ChartRedraw();
+   }
+
    datetime now = TimeCurrent();
    if(InpGroupedCapture)
       CaptureGroupedSnapshots(now);
@@ -549,6 +645,20 @@ void ManualCapture()
          string tfType = IsHTF(tfStr) ? "htf" : "ltf";
          CaptureTimeframe(_Symbol, tf, tfStr, "", tfType, iTime(_Symbol, tf, 0));
       }
+   }
+
+   //--- Restore button state
+   if(InpShowButton)
+   {
+      ObjectSetString(0, BUTTON_NAME, OBJPROP_TEXT, "✅ Sent!");
+      ObjectSetInteger(0, BUTTON_NAME, OBJPROP_BGCOLOR, clrForestGreen);
+      ChartRedraw();
+
+      //--- Reset to normal after brief delay (via timer would be better, but this works)
+      Sleep(1000);
+      ObjectSetString(0, BUTTON_NAME, OBJPROP_TEXT, "📷 Capture");
+      ObjectSetInteger(0, BUTTON_NAME, OBJPROP_BGCOLOR, clrDodgerBlue);
+      ChartRedraw();
    }
 }
 //+------------------------------------------------------------------+

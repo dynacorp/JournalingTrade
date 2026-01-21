@@ -427,7 +427,7 @@ export class DatabaseStorage implements IStorage {
 
   async upsertChartSnapshot(
     snapshot: InsertChartSnapshot & { candle_time?: Date },
-    isHTF: boolean
+    _isHTF: boolean  // Parameter kept for API compatibility but not used anymore
   ): Promise<ChartSnapshot> {
     const parseDate = (val: string | null | undefined): Date | null => {
       if (!val || val === "") return null;
@@ -441,70 +441,46 @@ export class DatabaseStorage implements IStorage {
       candle_time: snapshot.candle_time || null,
     };
 
-    // For HTF, we keep candle history (don't upsert, just check for exact duplicate)
-    // For LTF, we upsert based on symbol+timeframe (keep only latest)
-    if (isHTF && snapshotWithDates.candle_time) {
-      // HTF: Check if this exact candle already exists
-      const existing = await this.findSnapshotByCandleKey(
-        snapshotWithDates.symbol,
-        snapshotWithDates.timeframe,
-        snapshotWithDates.candle_time
-      );
-
-      if (existing) {
-        // Update the existing record with new image
-        const updated = await db
-          .update(chartSnapshots)
-          .set({
-            image_data: snapshotWithDates.image_data,
-            snapshot_time: snapshotWithDates.snapshot_time,
-            group_id: snapshotWithDates.group_id || existing.group_id,
-          })
-          .where(eq(chartSnapshots.id, existing.id))
-          .returning();
-        return updated[0];
-      }
-    } else {
-      // LTF: Find and update the latest snapshot for this symbol+timeframe
-      // (regardless of candle_time - keep only latest)
-      const existing = await db
-        .select()
-        .from(chartSnapshots)
-        .where(
-          and(
-            eq(chartSnapshots.symbol, snapshotWithDates.symbol),
-            eq(chartSnapshots.timeframe, snapshotWithDates.timeframe),
-            // Only upsert pending/pre_analyzed snapshots, not analyzed ones
-            or(
-              eq(chartSnapshots.status, "pending"),
-              eq(chartSnapshots.status, "pre_analyzed")
-            )
+    // Keep only the latest snapshot per symbol+timeframe
+    // Find existing pending/pre_analyzed snapshot for this symbol+timeframe and replace it
+    const existing = await db
+      .select()
+      .from(chartSnapshots)
+      .where(
+        and(
+          eq(chartSnapshots.symbol, snapshotWithDates.symbol),
+          eq(chartSnapshots.timeframe, snapshotWithDates.timeframe),
+          // Only replace pending/pre_analyzed snapshots, not analyzed ones
+          or(
+            eq(chartSnapshots.status, "pending"),
+            eq(chartSnapshots.status, "pre_analyzed"),
+            eq(chartSnapshots.status, "queued_for_review")
           )
         )
-        .orderBy(desc(chartSnapshots.created_at))
-        .limit(1);
+      )
+      .orderBy(desc(chartSnapshots.created_at))
+      .limit(1);
 
-      if (existing[0]) {
-        // Update existing LTF snapshot with new data
-        const updated = await db
-          .update(chartSnapshots)
-          .set({
-            snapshot_id: snapshotWithDates.snapshot_id,
-            image_data: snapshotWithDates.image_data,
-            snapshot_time: snapshotWithDates.snapshot_time,
-            candle_time: snapshotWithDates.candle_time,
-            group_id: snapshotWithDates.group_id || existing[0].group_id,
-            // Reset analysis since image changed
-            status: "pending",
-            pre_analysis_score: null,
-            pre_analysis_summary: null,
-            pre_analysis_bias: null,
-            pre_analysis_at: null,
-          })
-          .where(eq(chartSnapshots.id, existing[0].id))
-          .returning();
-        return updated[0];
-      }
+    if (existing[0]) {
+      // Update existing snapshot with new data (replaces old one)
+      const updated = await db
+        .update(chartSnapshots)
+        .set({
+          snapshot_id: snapshotWithDates.snapshot_id,
+          image_data: snapshotWithDates.image_data,
+          snapshot_time: snapshotWithDates.snapshot_time,
+          candle_time: snapshotWithDates.candle_time,
+          group_id: snapshotWithDates.group_id || existing[0].group_id,
+          // Reset analysis since image changed
+          status: "pending",
+          pre_analysis_score: null,
+          pre_analysis_summary: null,
+          pre_analysis_bias: null,
+          pre_analysis_at: null,
+        })
+        .where(eq(chartSnapshots.id, existing[0].id))
+        .returning();
+      return updated[0];
     }
 
     // No existing record found, create new
