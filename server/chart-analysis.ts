@@ -309,7 +309,7 @@ This is a LOWER TIMEFRAME (${timeframe}) chart for ENTRY timing. Your entry MUST
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 3000
+      max_completion_tokens: 3000  // GPT-5 requires max_completion_tokens instead of max_tokens
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");
