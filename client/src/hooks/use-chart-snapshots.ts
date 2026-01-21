@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { ChartSnapshot, ChartSnapshotStatus, FullAnalysisResult } from "@shared/schema";
 
+export type TradingStyle = "daytrading" | "swing";
+
 export interface ChartSnapshotListItem extends Omit<ChartSnapshot, "image_data"> {
   has_image: boolean;
 }
@@ -121,8 +123,8 @@ export function useAnalyzeSnapshot() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (id: number) => {
-      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/analyze`);
+    mutationFn: async ({ id, tradingStyle }: { id: number; tradingStyle?: TradingStyle }) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${id}/analyze`, { tradingStyle });
       return res.json();
     },
     onSuccess: () => {
@@ -215,8 +217,8 @@ export function useAnalyzeGroup() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (groupId: string) => {
-      const res = await apiRequest("POST", `/api/chart-snapshots/group/${groupId}/analyze`);
+    mutationFn: async ({ groupId, tradingStyle }: { groupId: string; tradingStyle?: TradingStyle }) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/group/${groupId}/analyze`, { tradingStyle });
       return res.json();
     },
     onSuccess: () => {
@@ -301,9 +303,9 @@ export interface ChartAnnotationResult {
 export function useGenerateAnnotations() {
   const queryClient = useQueryClient();
 
-  return useMutation<ChartAnnotationResult, Error, { snapshotId: number; force?: boolean }>({
-    mutationFn: async ({ snapshotId, force }) => {
-      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/annotate`, { force });
+  return useMutation<ChartAnnotationResult, Error, { snapshotId: number; force?: boolean; tradingStyle?: TradingStyle }>({
+    mutationFn: async ({ snapshotId, force, tradingStyle }) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/annotate`, { force, tradingStyle });
       return res.json();
     },
     onSuccess: (_, { snapshotId }) => {

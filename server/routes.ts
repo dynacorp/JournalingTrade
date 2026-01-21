@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertTradeSchema, insertMT5AccountSchema, ingestChartSnapshotSchema, type ChartSnapshotStatus } from "@shared/schema";
 import { generateTradeAnalysis, generateWeeklyAnalysis } from "./openai";
-import { processSnapshot, runAndSaveFullAnalysis, generateChartAnnotations } from "./chart-analysis";
+import { processSnapshot, runAndSaveFullAnalysis, generateChartAnnotations, type TradingStyle } from "./chart-analysis";
 import { fromZodError } from "zod-validation-error";
 import { startOfWeek, endOfWeek, subWeeks, isSunday } from "date-fns";
 
@@ -698,6 +698,7 @@ export async function registerRoutes(
   app.post("/api/chart-snapshots/:id/analyze", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      const { tradingStyle } = req.body as { tradingStyle?: TradingStyle };
       const snapshot = await storage.getChartSnapshot(id);
 
       if (!snapshot) {
@@ -705,7 +706,7 @@ export async function registerRoutes(
       }
 
       // Run full analysis (re-run even if already analyzed)
-      const analyzed = await runAndSaveFullAnalysis(id);
+      const analyzed = await runAndSaveFullAnalysis(id, tradingStyle || "daytrading");
 
       res.json(analyzed);
     } catch (error) {
@@ -718,7 +719,7 @@ export async function registerRoutes(
   app.post("/api/chart-snapshots/:id/annotate", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { force } = req.body; // Force regeneration even if already exists
+      const { force, tradingStyle } = req.body as { force?: boolean; tradingStyle?: TradingStyle };
       const snapshot = await storage.getChartSnapshot(id);
 
       if (!snapshot) {
@@ -766,7 +767,8 @@ export async function registerRoutes(
         snapshot.symbol,
         snapshot.timeframe,
         existingAnalysis,
-        priceContext
+        priceContext,
+        tradingStyle || "daytrading"
       );
 
       // Persist the annotations to the database
@@ -792,6 +794,8 @@ export async function registerRoutes(
   app.post("/api/chart-snapshots/group/:groupId/analyze", async (req, res) => {
     try {
       const { groupId } = req.params;
+      const { tradingStyle } = req.body as { tradingStyle?: TradingStyle };
+      const selectedStyle = tradingStyle || "daytrading";
       const snapshots = await storage.getChartSnapshotsByGroupId(groupId);
 
       if (snapshots.length === 0) {
@@ -807,14 +811,14 @@ export async function registerRoutes(
       // Analyze HTF first (for bias/structure context)
       for (const htf of htfSnapshots) {
         await storage.updateChartSnapshot(htf.id, { status: "approved" });
-        const analyzed = await runAndSaveFullAnalysis(htf.id);
+        const analyzed = await runAndSaveFullAnalysis(htf.id, selectedStyle);
         if (analyzed) results.push(analyzed);
       }
 
       // Then analyze LTF (entry) with HTF context
       for (const ltf of ltfSnapshots) {
         await storage.updateChartSnapshot(ltf.id, { status: "approved" });
-        const analyzed = await runAndSaveFullAnalysis(ltf.id);
+        const analyzed = await runAndSaveFullAnalysis(ltf.id, selectedStyle);
         if (analyzed) results.push(analyzed);
       }
 
@@ -843,13 +847,14 @@ export async function registerRoutes(
             visible_bars: updatedSnapshot.visible_bars,
           };
 
-          // Generate visual annotations with price context
+          // Generate visual annotations with price context and trading style
           const annotations = await generateChartAnnotations(
             updatedSnapshot.image_data,
             updatedSnapshot.symbol,
             updatedSnapshot.timeframe,
             existingAnalysis,
-            priceContext
+            priceContext,
+            selectedStyle
           );
 
           // Persist annotations

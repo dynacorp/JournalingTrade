@@ -14,6 +14,7 @@ import {
   useGenerateAnnotations,
   type GroupedChartSnapshot,
   type ChartAnnotation,
+  type TradingStyle,
 } from "@/hooks/use-chart-snapshots";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Loader2,
   CheckCircle,
@@ -134,6 +142,7 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedGroupTf, setSelectedGroupTf] = useState<string | null>(null);
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
+  const [tradingStyle, setTradingStyle] = useState<TradingStyle>("daytrading");
 
   const { data: snapshot, isLoading } = useChartSnapshot(snapshotId);
 
@@ -197,8 +206,8 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const handleReanalyze = async () => {
     if (!snapshotId) return;
     try {
-      await analyzeMutation.mutateAsync(snapshotId);
-      toast({ title: "Re-analysis Complete", description: "Confluence analysis has been updated." });
+      await analyzeMutation.mutateAsync({ id: snapshotId, tradingStyle });
+      toast({ title: "Re-analysis Complete", description: `Confluence analysis updated for ${tradingStyle === "daytrading" ? "Day Trading" : "Swing Trading"}.` });
     } catch {
       toast({ title: "Error", description: "Failed to re-analyze snapshot.", variant: "destructive" });
     }
@@ -235,10 +244,10 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const handleAnalyzeGroup = async () => {
     if (!snapshot?.group_id) return;
     try {
-      await analyzeGroupMutation.mutateAsync(snapshot.group_id);
+      await analyzeGroupMutation.mutateAsync({ groupId: snapshot.group_id, tradingStyle });
       toast({
         title: "Group Analysis Complete",
-        description: "All timeframes in the group have been analyzed.",
+        description: `All timeframes analyzed for ${tradingStyle === "daytrading" ? "Day Trading" : "Swing Trading"}.`,
       });
     } catch {
       toast({ title: "Error", description: "Failed to analyze group.", variant: "destructive" });
@@ -260,13 +269,13 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const handleGenerateAnnotations = async (force = false) => {
     if (!snapshotId) return;
     try {
-      const result = await generateAnnotationsMutation.mutateAsync({ snapshotId, force });
+      const result = await generateAnnotationsMutation.mutateAsync({ snapshotId, force, tradingStyle });
       setAnnotations(result.annotations);
       toast({
         title: result.cached ? "Breakdown Loaded" : "Breakdown Generated",
         description: result.cached
           ? `${result.annotations.length} annotations loaded from cache.`
-          : `${result.annotations.length} annotations added to chart.`,
+          : `${result.annotations.length} annotations added for ${tradingStyle === "daytrading" ? "day trading" : "swing trading"}.`,
       });
     } catch {
       toast({ title: "Error", description: "Failed to generate chart breakdown.", variant: "destructive" });
@@ -311,7 +320,18 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
         ) : snapshot ? (
           <div className="flex-1 overflow-hidden flex flex-col">
             {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2 py-4 shrink-0">
+            <div className="flex flex-wrap gap-2 py-4 shrink-0 items-center">
+              {/* Trading Style Selector */}
+              <Select value={tradingStyle} onValueChange={(v) => setTradingStyle(v as TradingStyle)}>
+                <SelectTrigger className="w-[140px] h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daytrading">Day Trading</SelectItem>
+                  <SelectItem value="swing">Swing Trading</SelectItem>
+                </SelectContent>
+              </Select>
+
               {hasGroup ? (
                 <Button onClick={handleAnalyzeGroup} disabled={isActionLoading} size="sm">
                   {analyzeGroupMutation.isPending ? (

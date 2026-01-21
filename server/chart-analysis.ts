@@ -99,12 +99,62 @@ export interface PriceContext {
   visible_bars: number | null;
 }
 
+// Trading style affects analysis parameters
+export type TradingStyle = "daytrading" | "swing";
+
+// Trading style specific configurations
+const TRADING_STYLE_CONFIG = {
+  daytrading: {
+    name: "Day Trading",
+    holdingPeriod: "minutes to hours (same session)",
+    preferredTimeframes: ["M1", "M5", "M15", "M30", "H1"],
+    riskRewardMin: 1.5,
+    targetDescription: "intraday highs/lows, session levels, nearby liquidity",
+    structureFocus: "LTF structure breaks, session ranges, micro BOS/CHOCH",
+    levelsFocus: "session highs/lows, previous day H/L, Asian range, overnight levels",
+    liquidityFocus: "session liquidity pools, tight equal highs/lows, micro sweeps",
+    entryPrecision: "precise to the pip, tight stops (5-20 pips)",
+    invalidationStyle: "tight, below/above immediate structure",
+    targetStyle: "quick targets at session levels, 1:1.5 to 1:3 R:R typical",
+    additionalRules: `
+- Focus on INTRADAY price action and session context
+- Consider time of day (London/NY sessions preferred for volatility)
+- Tight stops below/above recent swing structure (5-20 pips typical)
+- Quick targets at session levels, previous day H/L, or nearby liquidity
+- Be VERY picky about entries - day trading requires precision
+- Consider spread and commission impact on short-term trades
+- Avoid trading around major news events`,
+  },
+  swing: {
+    name: "Swing Trading",
+    holdingPeriod: "days to weeks",
+    preferredTimeframes: ["H4", "D1", "W1"],
+    riskRewardMin: 2.0,
+    targetDescription: "HTF levels, weekly/monthly zones, major liquidity pools",
+    structureFocus: "HTF trend, weekly/daily BOS/CHOCH, macro structure",
+    levelsFocus: "weekly/monthly S/R, institutional levels, major swing points",
+    liquidityFocus: "HTF liquidity pools, weekly equal highs/lows, major sweep events",
+    entryPrecision: "zone-based entries, wider stops (50-200 pips)",
+    invalidationStyle: "below/above major HTF structure",
+    targetStyle: "swing targets at weekly levels, 1:2 to 1:5 R:R typical",
+    additionalRules: `
+- Focus on HIGHER TIMEFRAME structure and major levels
+- Daily/Weekly bias takes precedence over LTF noise
+- Wider stops to account for normal market volatility
+- Targets at major HTF levels, previous week/month highs/lows
+- Patient entries - wait for HTF confirmation
+- Consider fundamental backdrop and major events
+- Multiple target approach (partial profits at key levels)`,
+  },
+} as const;
+
 export async function runFullAnalysis(
   imageBase64: string,
   symbol: string,
   timeframe: string,
   htfContext?: string,
-  priceContext?: PriceContext
+  priceContext?: PriceContext,
+  tradingStyle: TradingStyle = "daytrading"
 ): Promise<FullAnalysisResult> {
   try {
     // Build price context info for the prompt
@@ -121,7 +171,22 @@ When identifying levels, ensure they fall within this range.
 `
       : "";
 
-    const systemPrompt = `You are a MASTER institutional price action analyst. Your analysis determines real money decisions - treat this with absolute seriousness. You must be BRUTALLY HONEST. If there is no clear setup, say so. NEVER force or fabricate a trade.
+    const styleConfig = TRADING_STYLE_CONFIG[tradingStyle];
+
+    const systemPrompt = `You are a MASTER institutional price action analyst specializing in ${styleConfig.name.toUpperCase()}.
+Your analysis determines real money decisions - treat this with absolute seriousness. You must be BRUTALLY HONEST. If there is no clear setup, say so. NEVER force or fabricate a trade.
+
+## TRADING STYLE: ${styleConfig.name.toUpperCase()}
+- Holding Period: ${styleConfig.holdingPeriod}
+- Preferred Timeframes: ${styleConfig.preferredTimeframes.join(", ")}
+- Minimum Risk:Reward: 1:${styleConfig.riskRewardMin}
+- Structure Focus: ${styleConfig.structureFocus}
+- Key Levels Focus: ${styleConfig.levelsFocus}
+- Liquidity Focus: ${styleConfig.liquidityFocus}
+- Entry Style: ${styleConfig.entryPrecision}
+- Target Style: ${styleConfig.targetStyle}
+${styleConfig.additionalRules}
+
 ${priceInfo}
 
 ## YOUR MANDATE
@@ -210,14 +275,15 @@ SCORING CRITERIA:
 - 40-59: Candles are mixed or inconclusive
 - 0-39: No meaningful candle patterns at important levels
 
-## ENTRY LOGIC - THE GATEKEEP
+## ENTRY LOGIC - THE GATEKEEP (${styleConfig.name} Style)
 
 A VALID SETUP REQUIRES **ALL** OF THE FOLLOWING:
 1. Clear market structure bias (trend or reversal confirmation)
 2. Price at a high-value zone (key level + liquidity + origin/imbalance)
 3. Confluence of at least 3 factors pointing to the same direction
-4. Defined invalidation level with logical placement (below/above structure)
-5. Risk-reward of at least 1:2 to first target
+4. Defined invalidation level with logical placement (${styleConfig.invalidationStyle})
+5. Risk-reward of at least 1:${styleConfig.riskRewardMin} to first target
+6. Targets appropriate for ${styleConfig.name}: ${styleConfig.targetDescription}
 
 IF ANY OF THESE ARE MISSING → valid_setup: false
 
@@ -451,219 +517,63 @@ export async function generateChartAnnotations(
   symbol: string,
   timeframe: string,
   existingAnalysis?: FullAnalysisResult,
-  priceContext?: PriceContext
+  priceContext?: PriceContext,
+  tradingStyle: TradingStyle = "daytrading"
 ): Promise<ChartAnnotationResult> {
   try {
-    // Build price context for accurate annotation positioning
-    const priceRangeInfo = priceContext && priceContext.price_high && priceContext.price_low
-      ? `
-═══════════════════════════════════════════════════════════════
-EXACT PRICE RANGE (FROM MT5 - CRITICAL FOR POSITIONING)
-═══════════════════════════════════════════════════════════════
-• Chart High (y=0%): ${priceContext.price_high}
-• Chart Low (y=100%): ${priceContext.price_low}
-• Current Price: ${priceContext.current_price || "N/A"}
-• Price Range: ${(priceContext.price_high - priceContext.price_low).toFixed(5)}
-
-TO CALCULATE Y-COORDINATE FROM PRICE:
-y = ((price_high - YOUR_PRICE) / (price_high - price_low)) * 100
-
-Example: If price_high=${priceContext.price_high}, price_low=${priceContext.price_low}
-- A level at ${priceContext.price_high} would be y=0
-- A level at ${priceContext.price_low} would be y=100
-- A level at ${((priceContext.price_high + priceContext.price_low) / 2).toFixed(5)} would be y=50
-═══════════════════════════════════════════════════════════════
-`
+    // Build minimal price context - let GPT read the chart naturally
+    const priceInfo = priceContext && priceContext.price_high && priceContext.price_low
+      ? `Chart price range: ${priceContext.price_low} to ${priceContext.price_high}. Current price: ${priceContext.current_price || "visible on chart"}.`
       : "";
 
-    const analysisContext = existingAnalysis ? `
-═══════════════════════════════════════════════════════════════
-EXISTING ANALYSIS DATA - USE THIS TO GUIDE YOUR ANNOTATIONS
-═══════════════════════════════════════════════════════════════
-MARKET STRUCTURE:
-• Trend State: ${existingAnalysis.market_structure.trend_state}
-• Structure Points: ${existingAnalysis.market_structure.structure_points?.join(", ") || "none identified"}
-• BOS Confirmed: ${existingAnalysis.market_structure.bos_detected ? "YES ✓" : "NO"}
-• CHOCH Confirmed: ${existingAnalysis.market_structure.choch_detected ? "YES ✓" : "NO"}
-• Structure Score: ${existingAnalysis.market_structure.score}/100
+    const styleConfig = TRADING_STYLE_CONFIG[tradingStyle];
 
-KEY LEVELS:
-• Support: ${existingAnalysis.key_levels.support_levels.join(", ") || "none"}
-• Resistance: ${existingAnalysis.key_levels.resistance_levels.join(", ") || "none"}
-• S/R Flips: ${existingAnalysis.key_levels.sr_flips.join(", ") || "none"}
-• Levels Score: ${existingAnalysis.key_levels.score}/100
+    // Simple, natural prompt - like talking to ChatGPT directly
+    const systemPrompt = `You are an expert price action trader analyzing a chart. Look at this chart and mark up everything important you see, exactly like you would if you were teaching another trader.
 
-LIQUIDITY:
-• Equal Highs: ${existingAnalysis.liquidity.equal_highs.join(", ") || "none"}
-• Equal Lows: ${existingAnalysis.liquidity.equal_lows.join(", ") || "none"}
-• Sweep Detected: ${existingAnalysis.liquidity.sweep_detected ? "YES ✓" : "NO"}
-• Failed Breakout: ${existingAnalysis.liquidity.failed_breakout ? "YES ✓" : "NO"}
-• Liquidity Score: ${existingAnalysis.liquidity.score}/100
+TRADING STYLE: ${styleConfig.name}
+- Focus: ${styleConfig.structureFocus}
+- Key Levels: ${styleConfig.levelsFocus}
+- Targets: ${styleConfig.targetDescription}
 
-ORDER FLOW:
-• Origin Zones: ${existingAnalysis.impulse_origin.origin_zones?.map(z => `${z.start}-${z.end}`).join(", ") || "none"}
-• Compression: ${existingAnalysis.impulse_origin.compression_detected ? "YES ✓" : "NO"}
-• Expansion: ${existingAnalysis.impulse_origin.expansion_detected ? "YES ✓" : "NO"}
+YOUR TASK: Analyze this chart naturally and create annotations for the key elements you identify. Be thorough but only mark what you can clearly see.
 
-IMBALANCES:
-• FVG Zones: ${existingAnalysis.imbalance.fvg_zones?.map(z => `${z.start}-${z.end} (${z.filled ? "filled" : "unfilled"})`).join(", ") || "none"}
-• Rebalancing: ${existingAnalysis.imbalance.rebalancing_in_progress ? "IN PROGRESS" : "NO"}
+COORDINATE SYSTEM (IMPORTANT):
+- x: 0-100 (0 = left edge, 100 = right edge)
+- y: 0-100 (0 = TOP/highest prices, 100 = BOTTOM/lowest prices)
+- For horizontal lines, include "lineY" matching the y position
 
-ENTRY LOGIC:
-• Valid Setup: ${existingAnalysis.entry_logic.valid_setup ? "YES ✓" : "NO - DO NOT ANNOTATE ENTRY"}
-• Direction: ${existingAnalysis.entry_logic.trade_direction}
-• Entry Zone: ${existingAnalysis.entry_logic.entry_zone || "none"}
-• Invalidation: ${existingAnalysis.entry_logic.invalidation_level || "none"}
-• Targets: ${existingAnalysis.entry_logic.targets.join(", ") || "none"}
-• Confluences: ${existingAnalysis.entry_logic.confluence_list?.join(", ") || "none"}
-• Confidence: ${existingAnalysis.entry_logic.confidence}/100
+ANNOTATION TYPES you can use:
+- "support" (green #22c55e) - key support levels
+- "resistance" (red #ef4444) - key resistance levels
+- "bos" (blue #3b82f6) - break of structure
+- "choch" (purple #a855f7) - change of character
+- "liquidity" (orange #f97316) - equal highs/lows, liquidity pools
+- "sweep" (cyan #06b6d4) - liquidity sweeps
+- "orderblock" (blue #3b82f6) - order blocks/origin zones
+- "fvg" (yellow #eab308) - fair value gaps/imbalances
+- "entry" (green #22c55e) - potential entry zone
+- "target" (emerald #10b981) - take profit targets
 
-ASSESSMENT: ${existingAnalysis.overall_assessment}
-WEIGHTED SCORE: ${existingAnalysis.weighted_score}/100
-═══════════════════════════════════════════════════════════════
-` : "";
-
-    const systemPrompt = `You are a MASTER-LEVEL institutional chart annotator. Your annotations will be overlaid on trading charts for professional traders making real money decisions.
-
-═══════════════════════════════════════════════════════════════
-YOUR SACRED DUTY
-═══════════════════════════════════════════════════════════════
-1. PRECISION IS EVERYTHING - Every annotation must be pixel-accurate
-2. ONLY ANNOTATE WHAT YOU CAN CLEARLY SEE - Never guess or fabricate
-3. READ THE PRICE AXIS CAREFULLY - Get exact price levels from the right side
-4. IF NO SETUP EXISTS, ANNOTATE ONLY STRUCTURE - Do not invent entries
-5. QUALITY OVER QUANTITY - 5 precise annotations beat 15 sloppy ones
-
-═══════════════════════════════════════════════════════════════
-COORDINATE SYSTEM
-═══════════════════════════════════════════════════════════════
-Return positions as percentages (0-100) of the image:
-• x: 0 = left edge, 100 = right edge
-• y: 0 = TOP of image (HIGHEST prices), 100 = BOTTOM (LOWEST prices)
-
-CRITICAL: On a price chart, LOWER y-values = HIGHER prices!
-If a resistance level is at the top third of the chart, y ≈ 25-35
-If a support level is at the bottom third, y ≈ 65-75
-
-═══════════════════════════════════════════════════════════════
-WHAT TO ANNOTATE (IN ORDER OF IMPORTANCE)
-═══════════════════════════════════════════════════════════════
-
-1. MARKET STRUCTURE (ALWAYS ANNOTATE)
-   • BOS (Break of Structure): Where price CLOSES beyond a swing high/low
-     - Label: "BOS ↑" or "BOS ↓" with the price
-     - Must show clear break with body close, not just wick
-   • CHOCH (Change of Character): FIRST break against the trend
-     - Label: "CHOCH" - this signals potential reversal
-   • Swing Points: Label significant HH, HL, LH, LL with prices
-
-2. KEY LEVELS (ALWAYS ANNOTATE)
-   • Resistance: Levels where price rejected DOWN multiple times
-     - Label: "Resistance [PRICE]" - use RED (#ef4444)
-     - lineY REQUIRED for horizontal line
-   • Support: Levels where price bounced UP multiple times
-     - Label: "Support [PRICE]" - use GREEN (#22c55e)
-     - lineY REQUIRED for horizontal line
-   • S/R Flip: Previous resistance now support (or vice versa)
-     - Label: "S/R Flip [PRICE]" - POWERFUL confluence
-
-3. LIQUIDITY ZONES
-   • Equal Highs: 2+ highs at same price (stops above)
-     - Label: "EQH [PRICE]" with triangles pointing up
-     - Use ORANGE (#f97316)
-   • Equal Lows: 2+ lows at same price (stops below)
-     - Label: "EQL [PRICE]" with triangles pointing down
-   • Liquidity Sweep: Price pierced EQH/EQL then reversed
-     - Label: "Sweep ✓" - CYAN (#06b6d4)
-
-4. ORDER BLOCKS (Origin Zones)
-   • The consolidation BEFORE an impulsive move
-   • Label: "OB [PRICE RANGE]" - BLUE (#3b82f6)
-   • Only annotate if clearly visible candle base before displacement
-
-5. IMBALANCES (FVG - Fair Value Gaps)
-   • Gap between candle 1 high and candle 3 low (bullish FVG)
-   • Gap between candle 1 low and candle 3 high (bearish FVG)
-   • Label: "FVG [PRICE RANGE]" - YELLOW (#eab308)
-   • Indicate if filled or unfilled
-
-6. ENTRY/TARGET (ONLY IF VALID SETUP EXISTS)
-   ⚠️ CRITICAL: If existing analysis shows valid_setup: false, DO NOT annotate entry!
-   • Entry Zone: Where price should enter
-     - Label: "ENTRY [PRICE]" - GREEN (#22c55e)
-   • Invalidation: Where the trade idea is wrong
-     - Label: "INVALID [PRICE]" - RED dashed line
-   • Targets: TP1, TP2, etc.
-     - Label: "TP1 [PRICE]", "TP2 [PRICE]" - EMERALD (#10b981)
-
-═══════════════════════════════════════════════════════════════
-ANNOTATION POSITIONING RULES
-═══════════════════════════════════════════════════════════════
-
-1. HORIZONTAL LEVELS: Always provide lineY for S/R, EQH/EQL, entry, targets
-   - The label y and lineY should match for the line to go through it
-   - Place label text at x: 75-95 (right side of chart)
-
-2. POINT ANNOTATIONS (BOS, CHOCH, sweeps):
-   - Place at the actual candle where it occurred
-   - x: position along timeline where event happened
-   - y: at the price level of the event
-
-3. ZONE ANNOTATIONS (Order blocks, FVG):
-   - x: right side (75-90) for visibility
-   - y: center of the zone
-
-4. AVOID OVERLAPPING:
-   - Space annotations at least 5% apart vertically
-   - Use connector lines if label must be offset from actual position
-
-5. LABEL FORMATTING:
-   - Include price in label when possible
-   - Max 25 characters per label
-   - Be concise but clear
-
-═══════════════════════════════════════════════════════════════
-ANNOTATION TYPES AND COLORS (STRICT)
-═══════════════════════════════════════════════════════════════
-• entry: #22c55e (Green) - Entry zones
-• target: #10b981 (Emerald) - Take profit levels
-• support: #22c55e (Green) - Support levels
-• resistance: #ef4444 (Red) - Resistance levels
-• bos: #3b82f6 (Blue) - Break of structure
-• choch: #a855f7 (Purple) - Change of character
-• liquidity: #f97316 (Orange) - Equal highs/lows
-• fvg: #eab308 (Yellow) - Fair value gaps
-• orderblock: #3b82f6 (Blue) - Order blocks
-• sweep: #06b6d4 (Cyan) - Liquidity sweeps
-
-═══════════════════════════════════════════════════════════════
-RESPONSE FORMAT (JSON)
-═══════════════════════════════════════════════════════════════
+RESPOND WITH JSON:
 {
   "annotations": [
     {
-      "id": "unique-id-string",
-      "label": "Short label (max 25 chars)",
-      "description": "Detailed explanation of what this represents",
-      "type": "entry|target|support|resistance|bos|choch|liquidity|fvg|orderblock|sweep",
-      "x": 0-100 (percentage from left),
-      "y": 0-100 (percentage from top - REMEMBER: lower y = higher price),
-      "lineY": 0-100 (REQUIRED for horizontal levels),
-      "price": exact_price_from_chart,
+      "id": "unique-id",
+      "label": "Short label (e.g., 'BOS ↑', 'Support 1.2350')",
+      "description": "What this represents and why it matters",
+      "type": "one of the types above",
+      "x": 0-100,
+      "y": 0-100,
+      "lineY": (optional, for horizontal levels),
+      "price": (optional, exact price if visible),
       "color": "#hexcolor"
     }
   ],
-  "summary": "Professional 2-3 sentence assessment of what the chart shows and its quality as a setup"
+  "summary": "Your overall assessment of the chart - what's the story? Is there a trade here?"
 }
 
-═══════════════════════════════════════════════════════════════
-CRITICAL REMINDERS
-═══════════════════════════════════════════════════════════════
-• READ THE PRICE AXIS on the right side of the chart for exact levels
-• Double-check y-coordinates: HIGH prices = LOW y-values
-• If you can't clearly see something, DON'T annotate it
-• No valid setup? Annotate structure only, explain why in summary
-• Your annotations must be ACTIONABLE for a professional trader`;
+Be natural. Analyze like a pro trader, not like a robot following rules.`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -677,45 +587,24 @@ CRITICAL REMINDERS
           content: [
             {
               type: "text",
-              text: `ANALYZE THIS ${symbol} ${timeframe} CHART WITH SURGICAL PRECISION.
+              text: `Here's a ${symbol} ${timeframe} chart. ${priceInfo}
 
-Your annotations will be displayed directly on this chart for trading decisions.
-${priceRangeInfo}
-${analysisContext}
+Please analyze this chart and mark up everything important you see - structure, levels, liquidity, order blocks, imbalances, and any potential trade setups.
 
-INSTRUCTIONS:
-1. USE THE PROVIDED PRICE RANGE to calculate y-coordinates accurately
-2. Identify ALL visible market structure (BOS, CHOCH, swing points)
-3. Mark ALL clear support and resistance levels with exact prices
-4. Identify any liquidity pools (equal highs/lows) and note if swept
-5. Mark any visible order blocks (consolidation before impulse moves)
-6. Mark any unfilled fair value gaps
-7. ONLY if a valid setup exists, mark entry, invalidation, and targets
-
-Y-COORDINATE FORMULA (USE THIS):
-y = ((price_high - level_price) / (price_high - price_low)) * 100
-
-CRITICAL QUALITY CHECKS BEFORE RESPONDING:
-□ Did I use the provided price range for y-calculations?
-□ Are my y-coordinates correct? (higher prices = lower y-values)
-□ Do I have lineY for all horizontal levels?
-□ Are prices within the provided range?
-□ If no valid setup, did I avoid annotating entry/targets?
-
-Provide PROFESSIONAL-GRADE annotations. This is life or death for capital.`
+Tell me the story of what's happening on this chart and whether there's a trade opportunity here.`
             },
             {
               type: "image_url",
               image_url: {
                 url: `data:image/png;base64,${imageBase64}`,
-                detail: "high"  // Request high detail for better price reading
+                detail: "high"
               }
             }
           ]
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 3000  // Increased for more detailed annotations
+      max_tokens: 3000
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");
@@ -743,7 +632,10 @@ Provide PROFESSIONAL-GRADE annotations. This is life or death for capital.`
   }
 }
 
-export async function runAndSaveFullAnalysis(snapshotId: number): Promise<ChartSnapshot | null> {
+export async function runAndSaveFullAnalysis(
+  snapshotId: number,
+  tradingStyle: TradingStyle = "daytrading"
+): Promise<ChartSnapshot | null> {
   const snapshot = await storage.getChartSnapshot(snapshotId);
   if (!snapshot) return null;
 
@@ -779,7 +671,8 @@ export async function runAndSaveFullAnalysis(snapshotId: number): Promise<ChartS
       snapshot.symbol,
       snapshot.timeframe,
       htfContext,
-      priceContext
+      priceContext,
+      tradingStyle
     );
 
     const isValidSetup = fullResult.entry_logic.valid_setup;
