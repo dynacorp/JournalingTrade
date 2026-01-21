@@ -1,7 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Loader2, Sparkles } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Loader2, Sparkles, Maximize2, X } from "lucide-react";
 import type { ChartAnnotation } from "@/hooks/use-chart-snapshots";
 
 interface VisualAnnotationsProps {
@@ -20,7 +25,10 @@ export function VisualAnnotations({
   className,
 }: VisualAnnotationsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const fullscreenContainerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [fullscreenDimensions, setFullscreenDimensions] = useState({ width: 0, height: 0 });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Update dimensions when container resizes
   useEffect(() => {
@@ -38,6 +46,29 @@ export function VisualAnnotations({
 
     return () => observer.disconnect();
   }, []);
+
+  // Update fullscreen dimensions when dialog opens
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const container = fullscreenContainerRef.current;
+    if (!container) return;
+
+    const updateFullscreenDimensions = () => {
+      const rect = container.getBoundingClientRect();
+      setFullscreenDimensions({ width: rect.width, height: rect.height });
+    };
+
+    // Small delay to let dialog render
+    const timeout = setTimeout(updateFullscreenDimensions, 50);
+    const observer = new ResizeObserver(updateFullscreenDimensions);
+    observer.observe(container);
+
+    return () => {
+      clearTimeout(timeout);
+      observer.disconnect();
+    };
+  }, [isFullscreen]);
 
   // Group annotations by whether they have horizontal lines
   const lineAnnotations = annotations.filter(a => a.lineY !== undefined);
@@ -65,13 +96,22 @@ export function VisualAnnotations({
       {/* Chart with Annotations */}
       <div
         ref={containerRef}
-        className="relative rounded-lg overflow-hidden border border-border bg-black"
+        className="relative rounded-lg overflow-hidden border border-border bg-black cursor-pointer group"
+        onClick={() => setIsFullscreen(true)}
       >
         <img
           src={`data:image/png;base64,${imageData}`}
           alt="Chart snapshot"
           className="w-full h-auto block"
         />
+
+        {/* Fullscreen hint overlay */}
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center pointer-events-none">
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-3 py-2 rounded-lg flex items-center gap-2">
+            <Maximize2 className="w-4 h-4" />
+            <span className="text-sm">Click to view fullscreen</span>
+          </div>
+        </div>
 
         {/* SVG Overlay for annotations */}
         {dimensions.width > 0 && annotations.length > 0 && (
@@ -146,6 +186,89 @@ export function VisualAnnotations({
           {annotations.length} annotations generated
         </div>
       )}
+
+      {/* Fullscreen Dialog */}
+      <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
+        <DialogContent className="max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 bg-black border-border overflow-hidden">
+          <DialogTitle className="sr-only">Chart Breakdown Fullscreen View</DialogTitle>
+          <div className="relative">
+            {/* Close button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute top-2 right-2 z-50 bg-black/50 hover:bg-black/70 text-white"
+              onClick={() => setIsFullscreen(false)}
+            >
+              <X className="w-5 h-5" />
+            </Button>
+
+            {/* Fullscreen chart with annotations */}
+            <div
+              ref={fullscreenContainerRef}
+              className="relative"
+            >
+              <img
+                src={`data:image/png;base64,${imageData}`}
+                alt="Chart snapshot fullscreen"
+                className="max-w-[95vw] max-h-[90vh] w-auto h-auto block"
+              />
+
+              {/* SVG Overlay for annotations in fullscreen */}
+              {fullscreenDimensions.width > 0 && annotations.length > 0 && (
+                <svg
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  viewBox={`0 0 ${fullscreenDimensions.width} ${fullscreenDimensions.height}`}
+                  preserveAspectRatio="none"
+                >
+                  {lineAnnotations.map((annotation) => {
+                    const y = (annotation.lineY! / 100) * fullscreenDimensions.height;
+                    return (
+                      <line
+                        key={`fullscreen-line-${annotation.id}`}
+                        x1={0}
+                        y1={y}
+                        x2={fullscreenDimensions.width}
+                        y2={y}
+                        stroke={annotation.color}
+                        strokeWidth="2"
+                        strokeOpacity="0.8"
+                      />
+                    );
+                  })}
+                </svg>
+              )}
+
+              {/* HTML Overlay for annotation labels in fullscreen */}
+              {fullscreenDimensions.width > 0 && annotations.length > 0 && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {annotations.map((annotation) => {
+                    const x = (annotation.x / 100) * fullscreenDimensions.width;
+                    const y = (annotation.y / 100) * fullscreenDimensions.height;
+
+                    return (
+                      <AnnotationLabel
+                        key={`fullscreen-${annotation.id}`}
+                        annotation={annotation}
+                        x={x}
+                        y={y}
+                        containerWidth={fullscreenDimensions.width}
+                        isFullscreen
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Annotation count in fullscreen */}
+            {annotations.length > 0 && (
+              <div className="absolute bottom-2 left-2 text-xs text-white/70 bg-black/50 px-2 py-1 rounded">
+                {annotations.length} annotations
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -155,9 +278,10 @@ interface AnnotationLabelProps {
   x: number;
   y: number;
   containerWidth: number;
+  isFullscreen?: boolean;
 }
 
-function AnnotationLabel({ annotation, x, y, containerWidth }: AnnotationLabelProps) {
+function AnnotationLabel({ annotation, x, y, containerWidth, isFullscreen = false }: AnnotationLabelProps) {
   // Determine if label should be on left or right based on position
   const isRightSide = x > containerWidth / 2;
 
@@ -206,14 +330,15 @@ function AnnotationLabel({ annotation, x, y, containerWidth }: AnnotationLabelPr
     >
       <div
         className={cn(
-          "px-2 py-1 rounded border text-xs font-medium shadow-lg",
+          "rounded border font-medium shadow-lg",
+          isFullscreen ? "px-3 py-1.5 text-sm" : "px-2 py-1 text-xs",
           getTypeStyles()
         )}
         title={annotation.description}
       >
         <div className="font-semibold truncate">{annotation.label}</div>
         {annotation.price && (
-          <div className="font-mono text-[10px] opacity-90">
+          <div className={cn("font-mono opacity-90", isFullscreen ? "text-xs" : "text-[10px]")}>
             {annotation.price.toFixed(annotation.price >= 100 ? 2 : 5)}
           </div>
         )}
