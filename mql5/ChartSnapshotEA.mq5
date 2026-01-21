@@ -16,8 +16,8 @@
 //--- Input parameters
 input string   InpServerURL = "http://localhost:3000";     // Server URL
 input string   InpIngestionKey = "";                        // Ingestion Key (from MT5 Account settings)
-input int      InpImageWidth = 1920;                        // Screenshot width
-input int      InpImageHeight = 1080;                       // Screenshot height
+input int      InpImageWidth = 2560;                        // Screenshot width (2K for better AI readability)
+input int      InpImageHeight = 1440;                       // Screenshot height (2K for better AI readability)
 input bool     InpShowIndicators = true;                    // Include indicators in screenshot
 
 //--- Multi-timeframe settings
