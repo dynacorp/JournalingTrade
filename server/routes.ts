@@ -821,6 +821,7 @@ export async function registerRoutes(
   // DELETE /api/chart-snapshots - Delete all snapshots (with optional filters)
   // NOTE: This route MUST come before /:id route to avoid matching issues
   app.delete("/api/chart-snapshots", async (req, res) => {
+    console.log("DELETE /api/chart-snapshots called, query:", req.query);
     try {
       const { status, symbol, timeframe } = req.query;
 
@@ -830,9 +831,13 @@ export async function registerRoutes(
       if (symbol) filters.symbol = symbol as string;
       if (timeframe) filters.timeframe = timeframe as string;
 
+      console.log("Calling deleteAllChartSnapshots with filters:", filters);
+
       const deletedCount = await storage.deleteAllChartSnapshots(
         Object.keys(filters).length > 0 ? filters : undefined
       );
+
+      console.log("Deleted count:", deletedCount);
 
       res.json({
         success: true,

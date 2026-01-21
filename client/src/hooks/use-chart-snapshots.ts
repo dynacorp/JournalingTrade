@@ -257,8 +257,12 @@ export function useDeleteAllSnapshots() {
 
       const queryString = params.toString();
       const url = `/api/chart-snapshots${queryString ? `?${queryString}` : ""}`;
+      console.log("Deleting snapshots, URL:", url);
       const res = await apiRequest("DELETE", url);
-      return res.json();
+      console.log("Response status:", res.status);
+      const data = await res.json();
+      console.log("Response data:", data);
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
