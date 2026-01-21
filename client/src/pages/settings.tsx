@@ -26,7 +26,7 @@ export default function Settings() {
   const regenerateKey = useRegenerateMT5Key();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [newAccount, setNewAccount] = useState({ name: "", account_id: "", broker: "", initial_balance: "0" });
+  const [newAccount, setNewAccount] = useState({ name: "", account_id: "", broker: "" });
   const [copiedKey, setCopiedKey] = useState<number | null>(null);
 
   const { data: aiSetting } = useQuery({
@@ -58,10 +58,10 @@ export default function Settings() {
     try {
       await createAccount.mutateAsync({
         ...newAccount,
-        initial_balance: parseFloat(newAccount.initial_balance) || 0
+        initial_balance: 0
       });
       toast({ title: "Success", description: "MT5 account connected successfully" });
-      setNewAccount({ name: "", account_id: "", broker: "", initial_balance: "0" });
+      setNewAccount({ name: "", account_id: "", broker: "" });
       setIsDialogOpen(false);
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to connect account", variant: "destructive" });
@@ -147,23 +147,12 @@ export default function Settings() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="broker">Broker</Label>
-                        <Input 
-                          id="broker" 
+                        <Input
+                          id="broker"
                           placeholder="Deriv, IC Markets, etc."
                           value={newAccount.broker}
                           onChange={(e) => setNewAccount({ ...newAccount, broker: e.target.value })}
                           data-testid="input-mt5-broker"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="initial_balance">Initial Balance ($)</Label>
-                        <Input 
-                          id="initial_balance" 
-                          type="number"
-                          placeholder="10000"
-                          value={newAccount.initial_balance}
-                          onChange={(e) => setNewAccount({ ...newAccount, initial_balance: e.target.value })}
-                          data-testid="input-mt5-balance"
                         />
                       </div>
                     </div>
