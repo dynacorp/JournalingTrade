@@ -294,7 +294,7 @@ This is a LOWER TIMEFRAME (${timeframe}) chart for ENTRY timing. Your entry MUST
     }
 
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4o",  // Best multimodal model for chart analysis
       messages: [
         { role: "system", content: systemPrompt },
         {
@@ -303,13 +303,16 @@ This is a LOWER TIMEFRAME (${timeframe}) chart for ENTRY timing. Your entry MUST
             { type: "text", text: userPrompt },
             {
               type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageBase64}` }
+              image_url: {
+                url: `data:image/png;base64,${imageBase64}`,
+                detail: "high"  // High detail for better price axis reading
+              }
             }
           ]
         }
       ],
       response_format: { type: "json_object" },
-      max_completion_tokens: 3000  // GPT-5 requires max_completion_tokens instead of max_tokens
+      max_tokens: 4000  // Plenty of tokens for detailed analysis
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");
