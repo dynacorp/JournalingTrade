@@ -441,9 +441,31 @@ export class DatabaseStorage implements IStorage {
       candle_time: snapshot.candle_time || null,
     };
 
-    // Keep only the latest snapshot per symbol+timeframe
-    // Find existing pending/pre_analyzed snapshot for this symbol+timeframe and replace it
-    const existing = await db
+    // First, check if this exact snapshot_id already exists (duplicate submission)
+    const existingById = await db
+      .select()
+      .from(chartSnapshots)
+      .where(eq(chartSnapshots.snapshot_id, snapshotWithDates.snapshot_id))
+      .limit(1);
+
+    if (existingById[0]) {
+      // Same snapshot_id already exists - update it with fresh data
+      const updated = await db
+        .update(chartSnapshots)
+        .set({
+          image_data: snapshotWithDates.image_data,
+          snapshot_time: snapshotWithDates.snapshot_time,
+          candle_time: snapshotWithDates.candle_time,
+          group_id: snapshotWithDates.group_id || existingById[0].group_id,
+          tf_type: snapshotWithDates.tf_type || existingById[0].tf_type,
+        })
+        .where(eq(chartSnapshots.id, existingById[0].id))
+        .returning();
+      return updated[0];
+    }
+
+    // Check for existing pending/pre_analyzed snapshot for this symbol+timeframe to replace
+    const existingBySymbolTf = await db
       .select()
       .from(chartSnapshots)
       .where(
@@ -461,7 +483,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(chartSnapshots.created_at))
       .limit(1);
 
-    if (existing[0]) {
+    if (existingBySymbolTf[0]) {
       // Update existing snapshot with new data (replaces old one)
       const updated = await db
         .update(chartSnapshots)
@@ -470,7 +492,8 @@ export class DatabaseStorage implements IStorage {
           image_data: snapshotWithDates.image_data,
           snapshot_time: snapshotWithDates.snapshot_time,
           candle_time: snapshotWithDates.candle_time,
-          group_id: snapshotWithDates.group_id || existing[0].group_id,
+          group_id: snapshotWithDates.group_id || existingBySymbolTf[0].group_id,
+          tf_type: snapshotWithDates.tf_type || existingBySymbolTf[0].tf_type,
           // Reset analysis since image changed
           status: "pending",
           pre_analysis_score: null,
@@ -478,7 +501,7 @@ export class DatabaseStorage implements IStorage {
           pre_analysis_bias: null,
           pre_analysis_at: null,
         })
-        .where(eq(chartSnapshots.id, existing[0].id))
+        .where(eq(chartSnapshots.id, existingBySymbolTf[0].id))
         .returning();
       return updated[0];
     }
