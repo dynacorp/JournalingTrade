@@ -6,3 +6,4 @@ export { ImbalanceZones } from "./imbalance-zones";
 export { EntryZoneHighlight } from "./entry-zone-highlight";
 export { TargetLines } from "./target-lines";
 export { AnnotationLegend } from "./annotation-legend";
+export { VisualAnnotations } from "./visual-annotations";

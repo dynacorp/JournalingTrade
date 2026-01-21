@@ -314,6 +314,164 @@ export async function processSnapshot(snapshotId: number): Promise<ChartSnapshot
   }
 }
 
+// Chart annotation interface for visual breakdown
+export interface ChartAnnotation {
+  id: string;
+  label: string;
+  description: string;
+  type: "entry" | "target" | "support" | "resistance" | "bos" | "choch" | "liquidity" | "fvg" | "orderblock" | "sweep";
+  // Position as percentage of image (0-100)
+  x: number;
+  y: number;
+  // Optional: for horizontal lines
+  lineY?: number;
+  // Optional: price level
+  price?: number;
+  color: string;
+}
+
+export interface ChartAnnotationResult {
+  annotations: ChartAnnotation[];
+  summary: string;
+}
+
+export async function generateChartAnnotations(
+  imageBase64: string,
+  symbol: string,
+  timeframe: string,
+  existingAnalysis?: FullAnalysisResult
+): Promise<ChartAnnotationResult> {
+  try {
+    const analysisContext = existingAnalysis ? `
+EXISTING ANALYSIS DATA (use this to guide your annotations):
+- Trend: ${existingAnalysis.market_structure.trend_state}
+- BOS Detected: ${existingAnalysis.market_structure.bos_detected}
+- CHOCH Detected: ${existingAnalysis.market_structure.choch_detected}
+- Support Levels: ${existingAnalysis.key_levels.support_levels.join(", ") || "none"}
+- Resistance Levels: ${existingAnalysis.key_levels.resistance_levels.join(", ") || "none"}
+- S/R Flips: ${existingAnalysis.key_levels.sr_flips.join(", ") || "none"}
+- Equal Highs: ${existingAnalysis.liquidity.equal_highs.join(", ") || "none"}
+- Equal Lows: ${existingAnalysis.liquidity.equal_lows.join(", ") || "none"}
+- Sweep Detected: ${existingAnalysis.liquidity.sweep_detected}
+- Trade Direction: ${existingAnalysis.entry_logic.trade_direction}
+- Entry Zone: ${existingAnalysis.entry_logic.entry_zone}
+- Invalidation: ${existingAnalysis.entry_logic.invalidation_level}
+- Targets: ${existingAnalysis.entry_logic.targets.join(", ") || "none"}
+- Overall: ${existingAnalysis.overall_assessment}
+` : "";
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: `You are a chart annotation specialist. Your job is to identify key price action elements on a trading chart and provide their VISUAL POSITIONS for annotation overlays.
+
+You must analyze the chart image and identify where specific trading concepts appear VISUALLY on the chart. Return positions as percentages (0-100) of the image dimensions:
+- x: 0 = left edge, 100 = right edge
+- y: 0 = top edge, 100 = bottom edge
+
+For each annotation, provide:
+1. A short label (max 25 chars) that will appear on the chart
+2. A description explaining what it represents
+3. The visual position (x, y) as percentages where the label should appear
+4. For horizontal levels, also provide lineY (the y% where the line should be drawn)
+5. The price level if identifiable
+6. The type and color
+
+ANNOTATION TYPES AND COLORS:
+- entry: Green (#22c55e) - Entry zones
+- target: Emerald (#10b981) - Take profit targets
+- support: Green (#22c55e) - Support levels
+- resistance: Red (#ef4444) - Resistance levels
+- bos: Blue (#3b82f6) - Break of structure
+- choch: Purple (#a855f7) - Change of character
+- liquidity: Orange (#f97316) - Liquidity pools (equal highs/lows)
+- fvg: Yellow (#eab308) - Fair value gaps / imbalances
+- orderblock: Blue (#3b82f6) - Order blocks / origin zones
+- sweep: Cyan (#06b6d4) - Liquidity sweeps
+
+IMPORTANT POSITIONING RULES:
+1. Place labels NEAR but NOT OVERLAPPING the feature they describe
+2. Use the RIGHT side of the chart for most labels (x: 65-95)
+3. For horizontal levels, the label should be at the same y-position as the level
+4. Avoid clustering - spread annotations vertically
+5. Entry zones should be prominently labeled
+6. Target levels should be above (for longs) or below (for shorts) entry
+
+Return JSON:
+{
+  "annotations": [
+    {
+      "id": "unique-id",
+      "label": "Short label",
+      "description": "What this represents",
+      "type": "entry|target|support|resistance|bos|choch|liquidity|fvg|orderblock|sweep",
+      "x": 0-100,
+      "y": 0-100,
+      "lineY": 0-100 (optional, for horizontal lines),
+      "price": number (optional),
+      "color": "#hexcolor"
+    }
+  ],
+  "summary": "Brief summary of the chart setup"
+}`
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Analyze this ${symbol} ${timeframe} chart and provide visual annotations for key price action elements.
+${analysisContext}
+Identify and annotate:
+1. Key support/resistance levels with their prices
+2. Entry zone (if valid setup exists)
+3. Target levels (TP1, TP2, etc.)
+4. Any BOS (break of structure) or CHOCH (change of character)
+5. Liquidity pools (equal highs/lows)
+6. Order blocks or origin zones
+7. FVG/imbalance zones
+8. Liquidity sweeps
+
+Place annotations at their VISUAL positions on this specific chart image. Be precise about where elements appear.`
+            },
+            {
+              type: "image_url",
+              image_url: { url: `data:image/png;base64,${imageBase64}` }
+            }
+          ]
+        }
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 2000
+    });
+
+    const result = JSON.parse(response.choices[0].message.content || "{}");
+
+    return {
+      annotations: (result.annotations || []).map((a: ChartAnnotation, i: number) => ({
+        id: a.id || `annotation-${i}`,
+        label: a.label || "",
+        description: a.description || "",
+        type: a.type || "support",
+        x: Math.max(0, Math.min(100, a.x || 50)),
+        y: Math.max(0, Math.min(100, a.y || 50)),
+        lineY: a.lineY !== undefined ? Math.max(0, Math.min(100, a.lineY)) : undefined,
+        price: a.price,
+        color: a.color || "#ffffff",
+      })),
+      summary: result.summary || "Chart analysis complete",
+    };
+  } catch (error) {
+    console.error("Chart annotation generation failed:", error);
+    return {
+      annotations: [],
+      summary: "Failed to generate annotations",
+    };
+  }
+}
+
 export async function runAndSaveFullAnalysis(snapshotId: number): Promise<ChartSnapshot | null> {
   const snapshot = await storage.getChartSnapshot(snapshotId);
   if (!snapshot) return null;

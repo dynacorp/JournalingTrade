@@ -272,3 +272,39 @@ export function useDeleteAllSnapshots() {
     },
   });
 }
+
+// ==================== CHART ANNOTATION HOOKS ====================
+
+export interface ChartAnnotation {
+  id: string;
+  label: string;
+  description: string;
+  type: "entry" | "target" | "support" | "resistance" | "bos" | "choch" | "liquidity" | "fvg" | "orderblock" | "sweep";
+  x: number;
+  y: number;
+  lineY?: number;
+  price?: number;
+  color: string;
+}
+
+export interface ChartAnnotationResult {
+  snapshot_id: number;
+  symbol: string;
+  timeframe: string;
+  annotations: ChartAnnotation[];
+  summary: string;
+}
+
+export function useGenerateAnnotations() {
+  const queryClient = useQueryClient();
+
+  return useMutation<ChartAnnotationResult, Error, number>({
+    mutationFn: async (snapshotId: number) => {
+      const res = await apiRequest("POST", `/api/chart-snapshots/${snapshotId}/annotate`);
+      return res.json();
+    },
+    onSuccess: (_, snapshotId) => {
+      queryClient.invalidateQueries({ queryKey: ["chart-annotations", snapshotId] });
+    },
+  });
+}

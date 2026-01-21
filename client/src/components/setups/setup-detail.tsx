@@ -11,7 +11,9 @@ import {
   useUpdateSnapshotNotes,
   useMarkJournalCandidate,
   useDeleteSnapshot,
+  useGenerateAnnotations,
   type GroupedChartSnapshot,
+  type ChartAnnotation,
 } from "@/hooks/use-chart-snapshots";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -43,7 +45,7 @@ import {
   Eye,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { AnnotatedChart } from "@/components/chart-annotations";
+import { VisualAnnotations } from "@/components/chart-annotations";
 
 interface SetupDetailProps {
   snapshotId: number | null;
@@ -131,6 +133,7 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const [notes, setNotes] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   const [selectedGroupTf, setSelectedGroupTf] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
 
   const { data: snapshot, isLoading } = useChartSnapshot(snapshotId);
   const { data: groupSnapshots } = useChartSnapshotGroup(snapshot?.group_id ?? null);
@@ -141,13 +144,15 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const updateNotesMutation = useUpdateSnapshotNotes();
   const markJournalMutation = useMarkJournalCandidate();
   const deleteMutation = useDeleteSnapshot();
+  const generateAnnotationsMutation = useGenerateAnnotations();
 
   const isActionLoading =
     approveMutation.isPending ||
     discardMutation.isPending ||
     analyzeMutation.isPending ||
     analyzeGroupMutation.isPending ||
-    deleteMutation.isPending;
+    deleteMutation.isPending ||
+    generateAnnotationsMutation.isPending;
 
   // Get HTF and LTF snapshots from group
   const htfSnapshots = groupSnapshots?.filter(s => s.tf_type === "htf") ?? [];
@@ -240,6 +245,20 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
       onClose();
     } catch {
       toast({ title: "Error", description: "Failed to delete setup.", variant: "destructive" });
+    }
+  };
+
+  const handleGenerateAnnotations = async () => {
+    if (!snapshotId) return;
+    try {
+      const result = await generateAnnotationsMutation.mutateAsync(snapshotId);
+      setAnnotations(result.annotations);
+      toast({
+        title: "Breakdown Generated",
+        description: `${result.annotations.length} annotations added to chart.`,
+      });
+    } catch {
+      toast({ title: "Error", description: "Failed to generate chart breakdown.", variant: "destructive" });
     }
   };
 
@@ -342,7 +361,7 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                 <TabsTrigger value="chart">Chart</TabsTrigger>
                 {hasGroup && <TabsTrigger value="group">Group ({groupSnapshots?.length})</TabsTrigger>}
                 {isAnalyzed && <TabsTrigger value="analysis">Analysis</TabsTrigger>}
-                {isAnalyzed && <TabsTrigger value="deep"><Eye className="w-3 h-3 mr-1" />Deep</TabsTrigger>}
+                {snapshot.image_data && <TabsTrigger value="deep"><Eye className="w-3 h-3 mr-1" />Breakdown</TabsTrigger>}
                 <TabsTrigger value="notes">Notes</TabsTrigger>
               </TabsList>
 
@@ -641,314 +660,46 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                   </TabsContent>
                 )}
 
-                {/* Deep Analysis Tab with Annotated Chart */}
-                {isAnalyzed && (
+                {/* Deep Analysis Tab with AI-Generated Visual Breakdown */}
+                {snapshot.image_data && (
                   <TabsContent value="deep" className="m-0 space-y-4">
-                    {/* Annotated Chart */}
-                    {snapshot.image_data && analysis && (
-                      <AnnotatedChart
-                        imageData={snapshot.image_data}
-                        analysis={analysis}
-                        mode="full"
-                        showControls={true}
-                      />
+                    {/* Visual Annotations - AI analyzes the chart image directly */}
+                    <VisualAnnotations
+                      imageData={snapshot.image_data}
+                      annotations={annotations}
+                      isLoading={generateAnnotationsMutation.isPending}
+                      onGenerateAnnotations={handleGenerateAnnotations}
+                    />
+
+                    {/* Quick Analysis Summary - if analysis exists */}
+                    {isAnalyzed && analysis && (
+                      <div className="p-3 bg-muted/50 rounded-lg space-y-2 border border-border">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold">Analysis Summary</span>
+                          <Badge variant={analysis.entry_logic.valid_setup ? "default" : "secondary"}>
+                            {analysis.entry_logic.valid_setup
+                              ? `${analysis.entry_logic.trade_direction?.toUpperCase()} @ ${analysis.entry_logic.confidence}%`
+                              : "No Setup"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{analysis.overall_assessment}</p>
+                        {analysis.entry_logic.valid_setup && (
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-border/50">
+                            <Badge variant="outline" className="text-xs">
+                              Entry: {analysis.entry_logic.entry_zone}
+                            </Badge>
+                            <Badge variant="outline" className="text-xs text-red-500 border-red-500/30">
+                              SL: {analysis.entry_logic.invalidation_level}
+                            </Badge>
+                            {analysis.entry_logic.targets.map((t, i) => (
+                              <Badge key={i} variant="outline" className="text-xs text-emerald-500 border-emerald-500/30">
+                                TP{i + 1}: {t}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
-
-                    {/* Deep Breakdown Sections */}
-                    <div className="space-y-4 pt-4 border-t border-border">
-                      {/* Market Structure Section */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-blue-500" />
-                          <h4 className="font-semibold text-sm">MARKET STRUCTURE</h4>
-                          <Badge variant="outline" className="ml-auto font-mono">
-                            {analysis?.market_structure.score}/100
-                          </Badge>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm">Trend:</span>
-                            <Badge variant="outline" className="capitalize">
-                              {analysis?.market_structure.trend_state}
-                            </Badge>
-                            {analysis?.market_structure.bos_detected && (
-                              <Badge className="bg-blue-500">BOS</Badge>
-                            )}
-                            {analysis?.market_structure.choch_detected && (
-                              <Badge variant="secondary">CHOCH</Badge>
-                            )}
-                          </div>
-                          {analysis?.market_structure.structure_points && analysis.market_structure.structure_points.length > 0 && (
-                            <div className="space-y-1">
-                              <span className="text-xs text-muted-foreground">Structure Points:</span>
-                              <div className="text-xs space-y-0.5">
-                                {analysis.market_structure.structure_points.map((point, i) => (
-                                  <div key={i} className="flex items-center gap-1">
-                                    <span className="text-muted-foreground">•</span>
-                                    {point}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Key Levels Section */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Target className="w-4 h-4 text-purple-500" />
-                          <h4 className="font-semibold text-sm">KEY LEVELS</h4>
-                          <Badge variant="outline" className="ml-auto font-mono">
-                            {analysis?.key_levels.score}/100
-                          </Badge>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                          {analysis?.key_levels.resistance_levels && analysis.key_levels.resistance_levels.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-red-500 font-semibold w-20">Resistance:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.key_levels.resistance_levels.map((level, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-red-500/10 border-red-500/30">
-                                    {level}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {analysis?.key_levels.support_levels && analysis.key_levels.support_levels.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-green-500 font-semibold w-20">Support:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.key_levels.support_levels.map((level, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-green-500/10 border-green-500/30">
-                                    {level}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {analysis?.key_levels.sr_flips && analysis.key_levels.sr_flips.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-purple-500 font-semibold w-20">S/R Flips:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.key_levels.sr_flips.map((level, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-purple-500/10 border-purple-500/30">
-                                    {level}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Liquidity Section */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Activity className="w-4 h-4 text-orange-500" />
-                          <h4 className="font-semibold text-sm">LIQUIDITY</h4>
-                          <Badge variant="outline" className="ml-auto font-mono">
-                            {analysis?.liquidity.score}/100
-                          </Badge>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                          {analysis?.liquidity.equal_highs && analysis.liquidity.equal_highs.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-orange-500 font-semibold w-20">Equal Highs:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.liquidity.equal_highs.map((level, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-orange-500/10 border-orange-500/30">
-                                    {level}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {analysis?.liquidity.equal_lows && analysis.liquidity.equal_lows.length > 0 && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-cyan-500 font-semibold w-20">Equal Lows:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.liquidity.equal_lows.map((level, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-cyan-500/10 border-cyan-500/30">
-                                    {level}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-4 text-xs">
-                            <span className={cn(
-                              "flex items-center gap-1",
-                              analysis?.liquidity.sweep_detected ? "text-emerald-500" : "text-muted-foreground"
-                            )}>
-                              {analysis?.liquidity.sweep_detected ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                              Sweep {analysis?.liquidity.sweep_detected ? "Detected" : "Not detected"}
-                            </span>
-                            <span className={cn(
-                              "flex items-center gap-1",
-                              analysis?.liquidity.failed_breakout ? "text-emerald-500" : "text-muted-foreground"
-                            )}>
-                              {analysis?.liquidity.failed_breakout ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                              Failed Breakout
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Order Flow (Impulse Origin) Section */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Zap className="w-4 h-4 text-blue-500" />
-                          <h4 className="font-semibold text-sm">ORDER FLOW (OB)</h4>
-                          <Badge variant="outline" className="ml-auto font-mono">
-                            {analysis?.impulse_origin.score}/100
-                          </Badge>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                          {analysis?.impulse_origin.origin_zones && analysis.impulse_origin.origin_zones.length > 0 && (
-                            <div className="space-y-1">
-                              <span className="text-xs text-muted-foreground">Origin Zones (Order Blocks):</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.impulse_origin.origin_zones.map((zone, i) => (
-                                  <Badge key={i} variant="outline" className="font-mono text-xs bg-blue-500/10 border-blue-500/30">
-                                    {zone.start} - {zone.end}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-4 text-xs">
-                            <span className={cn(
-                              "flex items-center gap-1",
-                              analysis?.impulse_origin.compression_detected ? "text-emerald-500" : "text-muted-foreground"
-                            )}>
-                              {analysis?.impulse_origin.compression_detected ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                              Compression
-                            </span>
-                            <span className={cn(
-                              "flex items-center gap-1",
-                              analysis?.impulse_origin.expansion_detected ? "text-emerald-500" : "text-muted-foreground"
-                            )}>
-                              {analysis?.impulse_origin.expansion_detected ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                              Expansion
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Imbalances (FVG) Section */}
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <BarChart3 className="w-4 h-4 text-yellow-500" />
-                          <h4 className="font-semibold text-sm">IMBALANCES (FVG)</h4>
-                          <Badge variant="outline" className="ml-auto font-mono">
-                            {analysis?.imbalance.score}/100
-                          </Badge>
-                        </div>
-                        <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                          {analysis?.imbalance.fvg_zones && analysis.imbalance.fvg_zones.length > 0 && (
-                            <div className="space-y-1">
-                              <span className="text-xs text-muted-foreground">FVG Zones:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {analysis.imbalance.fvg_zones.map((zone, i) => (
-                                  <Badge
-                                    key={i}
-                                    variant="outline"
-                                    className={cn(
-                                      "font-mono text-xs",
-                                      zone.filled
-                                        ? "bg-gray-500/10 border-gray-500/30 line-through"
-                                        : "bg-yellow-500/10 border-yellow-500/30"
-                                    )}
-                                  >
-                                    {zone.start} - {zone.end} {zone.filled && "(filled)"}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className={cn(
-                              "flex items-center gap-1",
-                              analysis?.imbalance.rebalancing_in_progress ? "text-yellow-500" : "text-muted-foreground"
-                            )}>
-                              {analysis?.imbalance.rebalancing_in_progress ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-                              Rebalancing {analysis?.imbalance.rebalancing_in_progress ? "in progress" : "not active"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Entry Logic Section */}
-                      {analysis?.entry_logic.valid_setup && (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <TrendingUp className="w-4 h-4 text-emerald-500" />
-                            <h4 className="font-semibold text-sm">ENTRY LOGIC</h4>
-                            <Badge
-                              variant={analysis.entry_logic.trade_direction === "long" ? "default" : "destructive"}
-                              className="ml-auto"
-                            >
-                              {analysis.entry_logic.trade_direction?.toUpperCase()}
-                            </Badge>
-                          </div>
-                          <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg space-y-3">
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="text-xs text-muted-foreground">Entry Zone</span>
-                                <div className="font-mono font-semibold text-emerald-500">
-                                  {analysis.entry_logic.entry_zone}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-xs text-muted-foreground">Invalidation</span>
-                                <div className="font-mono font-semibold text-red-500">
-                                  {analysis.entry_logic.invalidation_level}
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-xs text-muted-foreground">Confidence</span>
-                                <div className="font-mono font-semibold">
-                                  {analysis.entry_logic.confidence}%
-                                </div>
-                              </div>
-                              <div>
-                                <span className="text-xs text-muted-foreground">Reason</span>
-                                <div className="text-xs">
-                                  {analysis.entry_logic.invalidation_reason || "—"}
-                                </div>
-                              </div>
-                            </div>
-                            {analysis.entry_logic.targets && analysis.entry_logic.targets.length > 0 && (
-                              <div>
-                                <span className="text-xs text-muted-foreground">Targets</span>
-                                <div className="flex gap-2 mt-1">
-                                  {analysis.entry_logic.targets.map((target, i) => (
-                                    <Badge key={i} className="font-mono bg-emerald-500/20 text-emerald-500 border-emerald-500/30">
-                                      TP{i + 1}: {target}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {analysis.entry_logic.confluence_list && analysis.entry_logic.confluence_list.length > 0 && (
-                              <div className="pt-2 border-t border-emerald-500/20">
-                                <span className="text-xs text-muted-foreground">Confluences</span>
-                                <ul className="mt-1 space-y-1">
-                                  {analysis.entry_logic.confluence_list.map((conf, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-xs">
-                                      <CheckCircle className="w-3 h-3 text-emerald-500 mt-0.5 shrink-0" />
-                                      {conf}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
                   </TabsContent>
                 )}
 

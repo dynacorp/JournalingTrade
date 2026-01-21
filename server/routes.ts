@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertTradeSchema, insertMT5AccountSchema, ingestChartSnapshotSchema, type ChartSnapshotStatus } from "@shared/schema";
 import { generateTradeAnalysis, generateWeeklyAnalysis } from "./openai";
-import { processSnapshot, runAndSaveFullAnalysis } from "./chart-analysis";
+import { processSnapshot, runAndSaveFullAnalysis, generateChartAnnotations } from "./chart-analysis";
 import { fromZodError } from "zod-validation-error";
 import { startOfWeek, endOfWeek, subWeeks, isSunday } from "date-fns";
 
@@ -691,6 +691,46 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error analyzing chart snapshot:", error);
       res.status(500).json({ error: "Failed to analyze chart snapshot" });
+    }
+  });
+
+  // POST /api/chart-snapshots/:id/annotate - Generate visual annotations for a chart
+  app.post("/api/chart-snapshots/:id/annotate", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const snapshot = await storage.getChartSnapshot(id);
+
+      if (!snapshot) {
+        return res.status(404).json({ error: "Snapshot not found" });
+      }
+
+      // Parse existing analysis if available
+      let existingAnalysis = undefined;
+      if (snapshot.full_analysis) {
+        try {
+          existingAnalysis = JSON.parse(snapshot.full_analysis);
+        } catch (e) {
+          // Ignore parsing errors
+        }
+      }
+
+      // Generate visual annotations
+      const annotations = await generateChartAnnotations(
+        snapshot.image_data,
+        snapshot.symbol,
+        snapshot.timeframe,
+        existingAnalysis
+      );
+
+      res.json({
+        snapshot_id: id,
+        symbol: snapshot.symbol,
+        timeframe: snapshot.timeframe,
+        ...annotations
+      });
+    } catch (error) {
+      console.error("Error generating chart annotations:", error);
+      res.status(500).json({ error: "Failed to generate chart annotations" });
     }
   });
 
