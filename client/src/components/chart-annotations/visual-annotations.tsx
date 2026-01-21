@@ -6,7 +6,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Sparkles, Maximize2, X, RefreshCw } from "lucide-react";
+import { Loader2, Sparkles, Maximize2, X, RefreshCw, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 import type { ChartAnnotation } from "@/hooks/use-chart-snapshots";
 
 // Hide the default dialog close button in fullscreen mode
@@ -110,6 +110,13 @@ export function VisualAnnotations({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hoveredAnnotation, setHoveredAnnotation] = useState<string | null>(null);
 
+  // Zoom and pan state for fullscreen
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const zoomContainerRef = useRef<HTMLDivElement>(null);
+
   const handleFullscreenImageLoad = useCallback(() => {
     const container = fullscreenContainerRef.current;
     if (!container) return;
@@ -131,6 +138,59 @@ export function VisualAnnotations({
     observer.observe(container);
 
     return () => observer.disconnect();
+  }, []);
+
+  // Reset zoom/pan when closing fullscreen
+  useEffect(() => {
+    if (!isFullscreen) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+    }
+  }, [isFullscreen]);
+
+  // Zoom handlers
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom(prev => Math.min(Math.max(prev + delta, 0.5), 5));
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    setZoom(prev => Math.min(prev + 0.25, 5));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom(prev => Math.max(prev - 0.25, 0.5));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  // Pan handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  }, [zoom, pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning && zoom > 1) {
+      setPan({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+    }
+  }, [isPanning, panStart, zoom]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsPanning(false);
   }, []);
 
   useEffect(() => {
@@ -301,67 +361,132 @@ export function VisualAnnotations({
         <DialogContent className="fullscreen-chart-dialog max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 bg-black/95 border-border overflow-hidden backdrop-blur-xl">
           <DialogTitle className="sr-only">Chart Breakdown Fullscreen View</DialogTitle>
           <div className="relative">
-            {/* Close button */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-3 right-3 z-50 bg-black/70 hover:bg-black/90 text-white border border-white/20"
-              onClick={() => setIsFullscreen(false)}
-            >
-              <X className="w-5 h-5" />
-            </Button>
+            {/* Control buttons - top bar */}
+            <div className="absolute top-3 left-3 right-3 z-50 flex items-center justify-between">
+              {/* Zoom controls */}
+              <div className="flex items-center gap-2 bg-black/70 backdrop-blur-sm rounded-lg p-1 border border-white/20">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handleZoomOut}
+                  disabled={zoom <= 0.5}
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </Button>
+                <span className="text-white text-sm font-mono min-w-[50px] text-center">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handleZoomIn}
+                  disabled={zoom >= 5}
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </Button>
+                <div className="w-px h-5 bg-white/20" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-white hover:bg-white/20"
+                  onClick={handleResetZoom}
+                  title="Reset zoom"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
+              </div>
 
-            {/* Fullscreen chart with annotations */}
+              {/* Close button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="bg-black/70 hover:bg-black/90 text-white border border-white/20"
+                onClick={() => setIsFullscreen(false)}
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
+
+            {/* Zoom hint */}
+            {zoom === 1 && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-black/60 text-white/70 text-xs px-3 py-1.5 rounded-full backdrop-blur-sm border border-white/10">
+                Scroll to zoom • Drag to pan when zoomed
+              </div>
+            )}
+
+            {/* Zoomable/pannable container */}
             <div
-              ref={fullscreenContainerRef}
-              className="relative"
+              ref={zoomContainerRef}
+              className={cn(
+                "overflow-hidden",
+                zoom > 1 ? "cursor-grab" : "cursor-default",
+                isPanning && "cursor-grabbing"
+              )}
+              onWheel={handleWheel}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
             >
-              <img
-                src={`data:image/png;base64,${imageData}`}
-                alt="Chart snapshot fullscreen"
-                className="max-w-[95vw] max-h-[90vh] w-auto h-auto block"
-                onLoad={handleFullscreenImageLoad}
-              />
-
-              {/* SVG Overlay for annotations in fullscreen */}
-              {fullscreenDimensions.width > 0 && annotations.length > 0 && (
-                <ProfessionalAnnotationSVG
-                  annotations={annotations}
-                  zoneAnnotations={zoneAnnotations}
-                  lineAnnotations={lineAnnotations}
-                  dimensions={fullscreenDimensions}
-                  hoveredAnnotation={hoveredAnnotation}
-                  isFullscreen
+              {/* Fullscreen chart with annotations */}
+              <div
+                ref={fullscreenContainerRef}
+                className="relative transition-transform duration-100"
+                style={{
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                  transformOrigin: "center center",
+                }}
+              >
+                <img
+                  src={`data:image/png;base64,${imageData}`}
+                  alt="Chart snapshot fullscreen"
+                  className="max-w-[95vw] max-h-[90vh] w-auto h-auto block select-none"
+                  onLoad={handleFullscreenImageLoad}
+                  draggable={false}
                 />
-              )}
 
-              {/* HTML Overlay for annotation labels in fullscreen */}
-              {fullscreenDimensions.width > 0 && annotations.length > 0 && (
-                <div className="absolute inset-0 pointer-events-none">
-                  {annotations.map((annotation) => {
-                    const x = (annotation.x / 100) * fullscreenDimensions.width;
-                    const y = (annotation.y / 100) * fullscreenDimensions.height;
+                {/* SVG Overlay for annotations in fullscreen */}
+                {fullscreenDimensions.width > 0 && annotations.length > 0 && (
+                  <ProfessionalAnnotationSVG
+                    annotations={annotations}
+                    zoneAnnotations={zoneAnnotations}
+                    lineAnnotations={lineAnnotations}
+                    dimensions={fullscreenDimensions}
+                    hoveredAnnotation={hoveredAnnotation}
+                    isFullscreen
+                  />
+                )}
 
-                    return (
-                      <ProfessionalAnnotationLabel
-                        key={`fullscreen-${annotation.id}`}
-                        annotation={annotation}
-                        x={x}
-                        y={y}
-                        containerWidth={fullscreenDimensions.width}
-                        isHovered={hoveredAnnotation === annotation.id}
-                        onHover={setHoveredAnnotation}
-                        isFullscreen
-                      />
-                    );
-                  })}
-                </div>
-              )}
+                {/* HTML Overlay for annotation labels in fullscreen */}
+                {fullscreenDimensions.width > 0 && annotations.length > 0 && (
+                  <div className="absolute inset-0 pointer-events-none">
+                    {annotations.map((annotation) => {
+                      const x = (annotation.x / 100) * fullscreenDimensions.width;
+                      const y = (annotation.y / 100) * fullscreenDimensions.height;
+
+                      return (
+                        <ProfessionalAnnotationLabel
+                          key={`fullscreen-${annotation.id}`}
+                          annotation={annotation}
+                          x={x}
+                          y={y}
+                          containerWidth={fullscreenDimensions.width}
+                          isHovered={hoveredAnnotation === annotation.id}
+                          onHover={setHoveredAnnotation}
+                          isFullscreen
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Floating legend in fullscreen */}
             {annotations.length > 0 && (
-              <div className="absolute bottom-4 left-4 right-4">
+              <div className="absolute bottom-4 left-4 right-4 z-40">
                 <AnnotationLegend annotations={annotations} isFullscreen />
               </div>
             )}

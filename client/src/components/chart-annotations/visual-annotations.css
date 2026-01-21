@@ -2,3 +2,14 @@
 .fullscreen-chart-dialog [data-radix-dialog-close] {
   display: none;
 }
+
+/* Prevent scrolling when zooming in fullscreen */
+.fullscreen-chart-dialog {
+  touch-action: none;
+}
+
+/* Smooth zoom transitions */
+.fullscreen-chart-dialog img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
