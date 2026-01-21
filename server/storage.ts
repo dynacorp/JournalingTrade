@@ -65,6 +65,12 @@ export interface IStorage {
 
   // Cleanup old LTF pending snapshots (keep only latest per symbol/timeframe)
   cleanupOldLTFSnapshots(maxAgeHours?: number): Promise<number>;
+
+  // Delete a single snapshot
+  deleteChartSnapshot(id: number): Promise<boolean>;
+
+  // Delete all snapshots (with optional filters)
+  deleteAllChartSnapshots(filters?: { status?: ChartSnapshotStatus; symbol?: string; timeframe?: string }): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -526,6 +532,47 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .returning();
+
+    return result.length;
+  }
+
+  async deleteChartSnapshot(id: number): Promise<boolean> {
+    const result = await db
+      .delete(chartSnapshots)
+      .where(eq(chartSnapshots.id, id))
+      .returning();
+    return result.length > 0;
+  }
+
+  async deleteAllChartSnapshots(filters?: {
+    status?: ChartSnapshotStatus;
+    symbol?: string;
+    timeframe?: string
+  }): Promise<number> {
+    const conditions: any[] = [];
+
+    if (filters?.status) {
+      conditions.push(eq(chartSnapshots.status, filters.status));
+    }
+    if (filters?.symbol) {
+      conditions.push(eq(chartSnapshots.symbol, filters.symbol));
+    }
+    if (filters?.timeframe) {
+      conditions.push(eq(chartSnapshots.timeframe, filters.timeframe));
+    }
+
+    let result;
+    if (conditions.length > 0) {
+      result = await db
+        .delete(chartSnapshots)
+        .where(and(...conditions))
+        .returning();
+    } else {
+      // Delete ALL snapshots
+      result = await db
+        .delete(chartSnapshots)
+        .returning();
+    }
 
     return result.length;
   }

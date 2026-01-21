@@ -10,6 +10,7 @@ import {
   useAnalyzeGroup,
   useUpdateSnapshotNotes,
   useMarkJournalCandidate,
+  useDeleteSnapshot,
   type GroupedChartSnapshot,
 } from "@/hooks/use-chart-snapshots";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -38,6 +39,7 @@ import {
   Clock,
   ArrowUp,
   ArrowDown,
+  Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -136,12 +138,14 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const analyzeGroupMutation = useAnalyzeGroup();
   const updateNotesMutation = useUpdateSnapshotNotes();
   const markJournalMutation = useMarkJournalCandidate();
+  const deleteMutation = useDeleteSnapshot();
 
   const isActionLoading =
     approveMutation.isPending ||
     discardMutation.isPending ||
     analyzeMutation.isPending ||
-    analyzeGroupMutation.isPending;
+    analyzeGroupMutation.isPending ||
+    deleteMutation.isPending;
 
   // Get HTF and LTF snapshots from group
   const htfSnapshots = groupSnapshots?.filter(s => s.tf_type === "htf") ?? [];
@@ -222,6 +226,18 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
       });
     } catch {
       toast({ title: "Error", description: "Failed to analyze group.", variant: "destructive" });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!snapshotId) return;
+    if (!confirm("Are you sure you want to permanently delete this setup?")) return;
+    try {
+      await deleteMutation.mutateAsync(snapshotId);
+      toast({ title: "Deleted", description: "Setup has been permanently deleted." });
+      onClose();
+    } catch {
+      toast({ title: "Error", description: "Failed to delete setup.", variant: "destructive" });
     }
   };
 
@@ -308,6 +324,14 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                   Discard
                 </Button>
               )}
+              <Button onClick={handleDelete} disabled={isActionLoading} size="sm" variant="ghost" className="text-destructive">
+                {deleteMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4 mr-2" />
+                )}
+                Delete
+              </Button>
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">

@@ -225,3 +225,46 @@ export function useAnalyzeGroup() {
     },
   });
 }
+
+// ==================== DELETE SNAPSHOT HOOKS ====================
+
+export function useDeleteSnapshot() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/chart-snapshots/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-group"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
+    },
+  });
+}
+
+export function useDeleteAllSnapshots() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (filters?: { status?: string; symbol?: string; timeframe?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.symbol) params.set("symbol", filters.symbol);
+      if (filters?.timeframe) params.set("timeframe", filters.timeframe);
+
+      const queryString = params.toString();
+      const url = `/api/chart-snapshots${queryString ? `?${queryString}` : ""}`;
+      const res = await apiRequest("DELETE", url);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshots"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-group"] });
+      queryClient.invalidateQueries({ queryKey: ["chart-snapshot-stats"] });
+    },
+  });
+}
