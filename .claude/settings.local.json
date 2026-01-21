@@ -6,7 +6,8 @@
       "Bash(findstr:*)",
       "Bash(npm run check:*)",
       "Bash(npx tsc:*)",
-      "Bash(timeout 15 npm run dev:*)"
+      "Bash(timeout 15 npm run dev:*)",
+      "Bash(npm run db:push:*)"
     ]
   }
 }

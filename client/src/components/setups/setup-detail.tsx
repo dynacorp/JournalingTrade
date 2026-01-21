@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
@@ -136,6 +136,15 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
   const [annotations, setAnnotations] = useState<ChartAnnotation[]>([]);
 
   const { data: snapshot, isLoading } = useChartSnapshot(snapshotId);
+
+  // Load persisted annotations when snapshot loads
+  useEffect(() => {
+    if (snapshot?.visual_annotations_parsed) {
+      setAnnotations(snapshot.visual_annotations_parsed);
+    } else {
+      setAnnotations([]);
+    }
+  }, [snapshot?.id, snapshot?.visual_annotations_parsed]);
   const { data: groupSnapshots } = useChartSnapshotGroup(snapshot?.group_id ?? null);
   const approveMutation = useApproveSnapshot();
   const discardMutation = useDiscardSnapshot();
@@ -248,14 +257,16 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
     }
   };
 
-  const handleGenerateAnnotations = async () => {
+  const handleGenerateAnnotations = async (force = false) => {
     if (!snapshotId) return;
     try {
-      const result = await generateAnnotationsMutation.mutateAsync(snapshotId);
+      const result = await generateAnnotationsMutation.mutateAsync({ snapshotId, force });
       setAnnotations(result.annotations);
       toast({
-        title: "Breakdown Generated",
-        description: `${result.annotations.length} annotations added to chart.`,
+        title: result.cached ? "Breakdown Loaded" : "Breakdown Generated",
+        description: result.cached
+          ? `${result.annotations.length} annotations loaded from cache.`
+          : `${result.annotations.length} annotations added to chart.`,
       });
     } catch {
       toast({ title: "Error", description: "Failed to generate chart breakdown.", variant: "destructive" });
@@ -668,7 +679,8 @@ export function SetupDetail({ snapshotId, isOpen, onClose }: SetupDetailProps) {
                       imageData={snapshot.image_data}
                       annotations={annotations}
                       isLoading={generateAnnotationsMutation.isPending}
-                      onGenerateAnnotations={handleGenerateAnnotations}
+                      onGenerateAnnotations={() => handleGenerateAnnotations(false)}
+                      onRegenerateAnnotations={() => handleGenerateAnnotations(true)}
                     />
 
                     {/* Quick Analysis Summary - if analysis exists */}

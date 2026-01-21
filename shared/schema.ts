@@ -178,6 +178,10 @@ export const chartSnapshots = pgTable("chart_snapshots", {
   linked_trade_id: integer("linked_trade_id").references(() => trades.id),
   auto_linked: boolean("auto_linked").default(false),
 
+  // Visual Annotations (AI-generated chart breakdown)
+  visual_annotations: text("visual_annotations"), // JSON stringified ChartAnnotation[]
+  visual_annotations_at: timestamp("visual_annotations_at", { withTimezone: true }),
+
   // Metadata
   user_notes: text("user_notes"),
   is_journal_candidate: boolean("is_journal_candidate").default(false),

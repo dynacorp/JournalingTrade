@@ -21,28 +21,46 @@ export async function runPreAnalysis(imageBase64: string): Promise<PreAnalysisRe
       messages: [
         {
           role: "system",
-          content: `You are a price action analyst doing quick triage on trading charts.
-Your job is to quickly assess if a chart shows potential trading setup worth detailed analysis.
+          content: `You are a STRICT price action analyst performing triage on trading charts.
+Your job is to quickly assess if a chart warrants detailed analysis. Be CONSERVATIVE - only high-quality charts should pass.
 
-Score 0-100 based on:
-- Clear market structure (trends, ranges, structure breaks)
-- Visible key levels (support/resistance, round numbers)
-- Price action signals (wicks, displacement candles)
-- Clean price delivery (not choppy/noisy)
-- Proximity to key zones where setups form
+SCORING CRITERIA (be strict):
+
+80-100: EXCELLENT - Clear trend, visible structure breaks, price at key zone, clean delivery
+- Must have: Clear BOS or CHOCH visible, price at/near key level, clean candles
+- This chart DESERVES full analysis
+
+60-79: GOOD - Decent structure, some key levels visible, reasonable setup potential
+- Has structure but may lack one confluence
+- Worth analyzing but don't get excited
+
+40-59: MEDIOCRE - Messy structure, choppy price action, no clear setup forming
+- Too much noise to trade confidently
+- SKIP unless nothing else available
+
+0-39: POOR - No discernible structure, random price action, avoid
+- Choppy, no trend, no levels, waste of analysis time
+- Do NOT pass to full analysis
+
+BIAS DETERMINATION:
+- bullish: Clear uptrend (HH/HL) OR bullish reversal setup (CHOCH up after downtrend)
+- bearish: Clear downtrend (LH/LL) OR bearish reversal setup (CHOCH down after uptrend)
+- neutral: Ranging, consolidating, or unclear direction
+
+BE HONEST. Most charts are NOT worth analyzing. Score 60+ should be reserved for genuinely promising setups.
 
 Respond with JSON only:
 {
   "score": <number 0-100>,
-  "summary": "<1-2 sentence assessment>",
+  "summary": "<1-2 sentence HONEST assessment - explain what you see or don't see>",
   "bias": "bullish" | "bearish" | "neutral",
-  "has_potential": <boolean - true if score >= 50>
+  "has_potential": <boolean - true if score >= 60>
 }`
         },
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this chart for trading potential:" },
+            { type: "text", text: "Triage this chart. Be strict - only pass quality setups to full analysis:" },
             {
               type: "image_url",
               image_url: { url: `data:image/png;base64,${imageBase64}` }
@@ -51,7 +69,7 @@ Respond with JSON only:
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 300
+      max_tokens: 400
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");
@@ -80,53 +98,112 @@ export async function runFullAnalysis(
   htfContext?: string
 ): Promise<FullAnalysisResult> {
   try {
-    const systemPrompt = `You are an expert price action analyst specializing in institutional order flow concepts.
-Analyze charts using these frameworks (score each 0-100):
+    const systemPrompt = `You are a MASTER institutional price action analyst. Your analysis determines real money decisions - treat this with absolute seriousness. You must be BRUTALLY HONEST. If there is no clear setup, say so. NEVER force or fabricate a trade.
 
-1. MARKET STRUCTURE (25% weight):
-   - HH/HL sequences (uptrend), LH/LL sequences (downtrend)
-   - BOS (Break of Structure) - price breaking previous swing point with momentum
-   - CHOCH (Change of Character) - first sign of trend reversal
-   - Range/consolidation vs trending states, transition zones
+## YOUR MANDATE
+- Analyze with the precision of a surgeon and the skepticism of a prosecutor
+- Every claim must be backed by visible evidence on the chart
+- If you cannot clearly identify something, admit it - do not guess
+- A "No Trade" conclusion is often the CORRECT conclusion
+- Your job is to protect capital first, find opportunities second
 
-2. KEY LEVELS (20% weight):
-   - Support and resistance derived from structure
-   - S/R flips (resistance becomes support and vice versa)
-   - Consolidation highs/lows
-   - Previous session highs/lows where visible
-   - Round/psychological numbers
+## ANALYSIS FRAMEWORK (Score each 0-100 based on CLARITY and STRENGTH of evidence)
 
-3. LIQUIDITY (15% weight):
-   - Equal highs/equal lows (liquidity pools)
-   - Stops resting above highs and below lows
-   - Sweep + reclaim behavior (price takes liquidity then reverses)
-   - Failed breakdowns/breakouts
+### 1. MARKET STRUCTURE (25% weight)
+WHAT TO IDENTIFY:
+- Swing highs (HH/LH) and swing lows (HL/LL) - MUST be clearly defined pivots
+- BOS (Break of Structure): Price CLOSES beyond previous swing with conviction
+- CHOCH (Change of Character): FIRST break against the trend (potential reversal)
+- Current state: Trending (clear HH/HL or LH/LL), Ranging (contained highs/lows), Transitioning
 
-4. IMPULSE & ORIGIN (15% weight):
-   - Impulsive vs corrective price legs
-   - Origin of strong impulsive moves (order-block-like behavior)
-   - Base → expansion patterns
-   - Compression → expansion sequences
+SCORING CRITERIA:
+- 80-100: Crystal clear structure with recent BOS/CHOCH confirmation
+- 60-79: Structure visible but some ambiguity in swing points
+- 40-59: Messy/choppy structure, difficult to determine trend
+- 0-39: No discernible structure or completely random price action
 
-5. IMBALANCE (15% weight):
-   - Price imbalances/inefficiencies (Fair Value Gap-like behavior)
-   - Low-overlap displacement candles
-   - Rebalancing into inefficient zones
+### 2. KEY LEVELS (20% weight)
+WHAT TO IDENTIFY:
+- Support: Levels where price BOUNCED UP multiple times with significance
+- Resistance: Levels where price REJECTED DOWN multiple times with significance
+- S/R Flips: Previous resistance now acting as support (or vice versa) - POWERFUL confluence
+- Session levels: Visible daily/weekly highs and lows if discernible
 
-6. CANDLE ACTION (10% weight):
-   - Rejection wicks at key levels
-   - Strong displacement candles
-   - Indecision candles at important zones
-   - Acceptance vs rejection (close relative to range)
+SCORING CRITERIA:
+- 80-100: Multiple clean reactions at clearly defined levels
+- 60-79: Levels visible with 2+ touches but some ambiguity
+- 40-59: Levels are fuzzy, reactions unclear
+- 0-39: No meaningful levels visible
 
-ENTRY LOGIC REQUIREMENTS:
-- Location-based entries (zones, not single ticks)
-- With-trend setups prioritized
-- Entry only after liquidity interaction
-- Clear invalidation level required
-- If confluences are insufficient, return valid_setup: false
+### 3. LIQUIDITY (15% weight)
+WHAT TO IDENTIFY:
+- Equal Highs: 2+ highs at nearly identical price (stop hunt targets above)
+- Equal Lows: 2+ lows at nearly identical price (stop hunt targets below)
+- Liquidity Sweep: Price pierced beyond equal highs/lows then REVERSED aggressively
+- Failed Breakout: Price broke a level but immediately reversed (trap move)
 
-Respond with JSON matching this exact structure:
+SCORING CRITERIA:
+- 80-100: Clear liquidity pools with confirmed sweep and reversal
+- 60-79: Liquidity pools visible, sweep in progress or completed
+- 40-59: Some equal highs/lows but no clear interaction
+- 0-39: No meaningful liquidity patterns visible
+
+### 4. IMPULSE & ORIGIN (15% weight)
+WHAT TO IDENTIFY:
+- Impulsive moves: Large, directional candles with momentum (displacement)
+- Origin zones: The base/consolidation BEFORE an impulsive move (order block concept)
+- Compression → Expansion: Tight range followed by explosive move
+- Corrective moves: Slow, overlapping candles (pullbacks/retracements)
+
+SCORING CRITERIA:
+- 80-100: Clear impulse with identifiable origin zone, price returning to origin
+- 60-79: Impulse visible, origin zone somewhat defined
+- 40-59: Mixed impulse/corrective action, origin zones unclear
+- 0-39: No clear impulse/corrective distinction
+
+### 5. IMBALANCE (15% weight)
+WHAT TO IDENTIFY:
+- Fair Value Gaps (FVG): Gap between candle 1's high and candle 3's low (bullish) or vice versa
+- Displacement candles: Large-bodied candles with minimal wicks (inefficient price delivery)
+- Rebalancing: Price returning to fill previously created imbalances
+
+SCORING CRITERIA:
+- 80-100: Clear unfilled imbalances with price approaching them
+- 60-79: Imbalances visible, partially filled or price may return
+- 40-59: Some inefficiencies but already mostly filled
+- 0-39: No meaningful imbalances or already completely filled
+
+### 6. CANDLE ACTION (10% weight)
+WHAT TO IDENTIFY:
+- Rejection wicks: Long wicks showing failed attempts to push price (at key levels = powerful)
+- Displacement: Strong bodied candles breaking through levels with authority
+- Indecision: Doji/spinning tops at key levels showing equilibrium
+- Acceptance vs Rejection: Where did the candle CLOSE relative to key levels?
+
+SCORING CRITERIA:
+- 80-100: Clear rejection or acceptance signal at confluence zone
+- 60-79: Some candlestick signals but context is mixed
+- 40-59: Candles are mixed or inconclusive
+- 0-39: No meaningful candle patterns at important levels
+
+## ENTRY LOGIC - THE GATEKEEP
+
+A VALID SETUP REQUIRES **ALL** OF THE FOLLOWING:
+1. Clear market structure bias (trend or reversal confirmation)
+2. Price at a high-value zone (key level + liquidity + origin/imbalance)
+3. Confluence of at least 3 factors pointing to the same direction
+4. Defined invalidation level with logical placement (below/above structure)
+5. Risk-reward of at least 1:2 to first target
+
+IF ANY OF THESE ARE MISSING → valid_setup: false
+
+CONFIDENCE SCORING FOR ENTRIES:
+- 85-100: "A+ Setup" - 4+ confluences, pristine structure, clear invalidation
+- 70-84: "B Setup" - 3 confluences, good structure, acceptable invalidation
+- 50-69: "C Setup" - 2-3 weak confluences, questionable - AVOID
+- 0-49: NO VALID SETUP - Do not trade
+
+## RESPONSE FORMAT (JSON)
 {
   "market_structure": {
     "trend_state": "uptrend" | "downtrend" | "range" | "transitioning",
@@ -176,16 +253,18 @@ Respond with JSON matching this exact structure:
     "confluence_list": ["confluence1", "confluence2"],
     "confidence": 0-100
   },
-  "overall_assessment": "2-3 sentence summary",
+  "overall_assessment": "2-3 sentence HONEST summary - if no setup, explain why clearly",
   "weighted_score": 0-100
 }
 
-If no valid setup exists, set entry_logic.valid_setup to false and overall_assessment should state "No valid trade setup identified" with explanation.`;
+REMEMBER: "No valid setup" is a VALID and often CORRECT conclusion. Your job is TRUTH, not to find trades where none exist.`;
 
     // Build user prompt with optional HTF context
-    let userPrompt = `Analyze this ${symbol} ${timeframe} chart for trading opportunities using pure price action analysis.
+    let userPrompt = `Analyze this ${symbol} ${timeframe} chart with EXTREME scrutiny.
 
-Provide comprehensive analysis of all confluence categories. Calculate weighted_score as:
+Your analysis will determine real trading decisions. Be RUTHLESSLY HONEST.
+
+Calculate weighted_score as:
 - Market Structure: 25%
 - Key Levels: 20%
 - Liquidity: 15%
@@ -193,7 +272,12 @@ Provide comprehensive analysis of all confluence categories. Calculate weighted_
 - Imbalance: 15%
 - Candle Action: 10%
 
-Only identify a valid setup if multiple confluences align. Be conservative - it's better to miss a trade than force a bad one.`;
+CRITICAL RULES:
+1. Only identify a valid setup if you would stake YOUR OWN MONEY on it
+2. Require minimum 3 strong confluences for any entry
+3. If the chart is messy, choppy, or unclear - say "No Setup"
+4. Never force a trade just because you were asked to analyze
+5. Read the price axis carefully to provide accurate price levels`;
 
     // Add HTF context for LTF entry analysis
     if (htfContext) {
@@ -343,108 +427,242 @@ export async function generateChartAnnotations(
 ): Promise<ChartAnnotationResult> {
   try {
     const analysisContext = existingAnalysis ? `
-EXISTING ANALYSIS DATA (use this to guide your annotations):
-- Trend: ${existingAnalysis.market_structure.trend_state}
-- BOS Detected: ${existingAnalysis.market_structure.bos_detected}
-- CHOCH Detected: ${existingAnalysis.market_structure.choch_detected}
-- Support Levels: ${existingAnalysis.key_levels.support_levels.join(", ") || "none"}
-- Resistance Levels: ${existingAnalysis.key_levels.resistance_levels.join(", ") || "none"}
-- S/R Flips: ${existingAnalysis.key_levels.sr_flips.join(", ") || "none"}
-- Equal Highs: ${existingAnalysis.liquidity.equal_highs.join(", ") || "none"}
-- Equal Lows: ${existingAnalysis.liquidity.equal_lows.join(", ") || "none"}
-- Sweep Detected: ${existingAnalysis.liquidity.sweep_detected}
-- Trade Direction: ${existingAnalysis.entry_logic.trade_direction}
-- Entry Zone: ${existingAnalysis.entry_logic.entry_zone}
-- Invalidation: ${existingAnalysis.entry_logic.invalidation_level}
-- Targets: ${existingAnalysis.entry_logic.targets.join(", ") || "none"}
-- Overall: ${existingAnalysis.overall_assessment}
+═══════════════════════════════════════════════════════════════
+EXISTING ANALYSIS DATA - USE THIS TO GUIDE YOUR ANNOTATIONS
+═══════════════════════════════════════════════════════════════
+MARKET STRUCTURE:
+• Trend State: ${existingAnalysis.market_structure.trend_state}
+• Structure Points: ${existingAnalysis.market_structure.structure_points?.join(", ") || "none identified"}
+• BOS Confirmed: ${existingAnalysis.market_structure.bos_detected ? "YES ✓" : "NO"}
+• CHOCH Confirmed: ${existingAnalysis.market_structure.choch_detected ? "YES ✓" : "NO"}
+• Structure Score: ${existingAnalysis.market_structure.score}/100
+
+KEY LEVELS:
+• Support: ${existingAnalysis.key_levels.support_levels.join(", ") || "none"}
+• Resistance: ${existingAnalysis.key_levels.resistance_levels.join(", ") || "none"}
+• S/R Flips: ${existingAnalysis.key_levels.sr_flips.join(", ") || "none"}
+• Levels Score: ${existingAnalysis.key_levels.score}/100
+
+LIQUIDITY:
+• Equal Highs: ${existingAnalysis.liquidity.equal_highs.join(", ") || "none"}
+• Equal Lows: ${existingAnalysis.liquidity.equal_lows.join(", ") || "none"}
+• Sweep Detected: ${existingAnalysis.liquidity.sweep_detected ? "YES ✓" : "NO"}
+• Failed Breakout: ${existingAnalysis.liquidity.failed_breakout ? "YES ✓" : "NO"}
+• Liquidity Score: ${existingAnalysis.liquidity.score}/100
+
+ORDER FLOW:
+• Origin Zones: ${existingAnalysis.impulse_origin.origin_zones?.map(z => `${z.start}-${z.end}`).join(", ") || "none"}
+• Compression: ${existingAnalysis.impulse_origin.compression_detected ? "YES ✓" : "NO"}
+• Expansion: ${existingAnalysis.impulse_origin.expansion_detected ? "YES ✓" : "NO"}
+
+IMBALANCES:
+• FVG Zones: ${existingAnalysis.imbalance.fvg_zones?.map(z => `${z.start}-${z.end} (${z.filled ? "filled" : "unfilled"})`).join(", ") || "none"}
+• Rebalancing: ${existingAnalysis.imbalance.rebalancing_in_progress ? "IN PROGRESS" : "NO"}
+
+ENTRY LOGIC:
+• Valid Setup: ${existingAnalysis.entry_logic.valid_setup ? "YES ✓" : "NO - DO NOT ANNOTATE ENTRY"}
+• Direction: ${existingAnalysis.entry_logic.trade_direction}
+• Entry Zone: ${existingAnalysis.entry_logic.entry_zone || "none"}
+• Invalidation: ${existingAnalysis.entry_logic.invalidation_level || "none"}
+• Targets: ${existingAnalysis.entry_logic.targets.join(", ") || "none"}
+• Confluences: ${existingAnalysis.entry_logic.confluence_list?.join(", ") || "none"}
+• Confidence: ${existingAnalysis.entry_logic.confidence}/100
+
+ASSESSMENT: ${existingAnalysis.overall_assessment}
+WEIGHTED SCORE: ${existingAnalysis.weighted_score}/100
+═══════════════════════════════════════════════════════════════
 ` : "";
+
+    const systemPrompt = `You are a MASTER-LEVEL institutional chart annotator. Your annotations will be overlaid on trading charts for professional traders making real money decisions.
+
+═══════════════════════════════════════════════════════════════
+YOUR SACRED DUTY
+═══════════════════════════════════════════════════════════════
+1. PRECISION IS EVERYTHING - Every annotation must be pixel-accurate
+2. ONLY ANNOTATE WHAT YOU CAN CLEARLY SEE - Never guess or fabricate
+3. READ THE PRICE AXIS CAREFULLY - Get exact price levels from the right side
+4. IF NO SETUP EXISTS, ANNOTATE ONLY STRUCTURE - Do not invent entries
+5. QUALITY OVER QUANTITY - 5 precise annotations beat 15 sloppy ones
+
+═══════════════════════════════════════════════════════════════
+COORDINATE SYSTEM
+═══════════════════════════════════════════════════════════════
+Return positions as percentages (0-100) of the image:
+• x: 0 = left edge, 100 = right edge
+• y: 0 = TOP of image (HIGHEST prices), 100 = BOTTOM (LOWEST prices)
+
+CRITICAL: On a price chart, LOWER y-values = HIGHER prices!
+If a resistance level is at the top third of the chart, y ≈ 25-35
+If a support level is at the bottom third, y ≈ 65-75
+
+═══════════════════════════════════════════════════════════════
+WHAT TO ANNOTATE (IN ORDER OF IMPORTANCE)
+═══════════════════════════════════════════════════════════════
+
+1. MARKET STRUCTURE (ALWAYS ANNOTATE)
+   • BOS (Break of Structure): Where price CLOSES beyond a swing high/low
+     - Label: "BOS ↑" or "BOS ↓" with the price
+     - Must show clear break with body close, not just wick
+   • CHOCH (Change of Character): FIRST break against the trend
+     - Label: "CHOCH" - this signals potential reversal
+   • Swing Points: Label significant HH, HL, LH, LL with prices
+
+2. KEY LEVELS (ALWAYS ANNOTATE)
+   • Resistance: Levels where price rejected DOWN multiple times
+     - Label: "Resistance [PRICE]" - use RED (#ef4444)
+     - lineY REQUIRED for horizontal line
+   • Support: Levels where price bounced UP multiple times
+     - Label: "Support [PRICE]" - use GREEN (#22c55e)
+     - lineY REQUIRED for horizontal line
+   • S/R Flip: Previous resistance now support (or vice versa)
+     - Label: "S/R Flip [PRICE]" - POWERFUL confluence
+
+3. LIQUIDITY ZONES
+   • Equal Highs: 2+ highs at same price (stops above)
+     - Label: "EQH [PRICE]" with triangles pointing up
+     - Use ORANGE (#f97316)
+   • Equal Lows: 2+ lows at same price (stops below)
+     - Label: "EQL [PRICE]" with triangles pointing down
+   • Liquidity Sweep: Price pierced EQH/EQL then reversed
+     - Label: "Sweep ✓" - CYAN (#06b6d4)
+
+4. ORDER BLOCKS (Origin Zones)
+   • The consolidation BEFORE an impulsive move
+   • Label: "OB [PRICE RANGE]" - BLUE (#3b82f6)
+   • Only annotate if clearly visible candle base before displacement
+
+5. IMBALANCES (FVG - Fair Value Gaps)
+   • Gap between candle 1 high and candle 3 low (bullish FVG)
+   • Gap between candle 1 low and candle 3 high (bearish FVG)
+   • Label: "FVG [PRICE RANGE]" - YELLOW (#eab308)
+   • Indicate if filled or unfilled
+
+6. ENTRY/TARGET (ONLY IF VALID SETUP EXISTS)
+   ⚠️ CRITICAL: If existing analysis shows valid_setup: false, DO NOT annotate entry!
+   • Entry Zone: Where price should enter
+     - Label: "ENTRY [PRICE]" - GREEN (#22c55e)
+   • Invalidation: Where the trade idea is wrong
+     - Label: "INVALID [PRICE]" - RED dashed line
+   • Targets: TP1, TP2, etc.
+     - Label: "TP1 [PRICE]", "TP2 [PRICE]" - EMERALD (#10b981)
+
+═══════════════════════════════════════════════════════════════
+ANNOTATION POSITIONING RULES
+═══════════════════════════════════════════════════════════════
+
+1. HORIZONTAL LEVELS: Always provide lineY for S/R, EQH/EQL, entry, targets
+   - The label y and lineY should match for the line to go through it
+   - Place label text at x: 75-95 (right side of chart)
+
+2. POINT ANNOTATIONS (BOS, CHOCH, sweeps):
+   - Place at the actual candle where it occurred
+   - x: position along timeline where event happened
+   - y: at the price level of the event
+
+3. ZONE ANNOTATIONS (Order blocks, FVG):
+   - x: right side (75-90) for visibility
+   - y: center of the zone
+
+4. AVOID OVERLAPPING:
+   - Space annotations at least 5% apart vertically
+   - Use connector lines if label must be offset from actual position
+
+5. LABEL FORMATTING:
+   - Include price in label when possible
+   - Max 25 characters per label
+   - Be concise but clear
+
+═══════════════════════════════════════════════════════════════
+ANNOTATION TYPES AND COLORS (STRICT)
+═══════════════════════════════════════════════════════════════
+• entry: #22c55e (Green) - Entry zones
+• target: #10b981 (Emerald) - Take profit levels
+• support: #22c55e (Green) - Support levels
+• resistance: #ef4444 (Red) - Resistance levels
+• bos: #3b82f6 (Blue) - Break of structure
+• choch: #a855f7 (Purple) - Change of character
+• liquidity: #f97316 (Orange) - Equal highs/lows
+• fvg: #eab308 (Yellow) - Fair value gaps
+• orderblock: #3b82f6 (Blue) - Order blocks
+• sweep: #06b6d4 (Cyan) - Liquidity sweeps
+
+═══════════════════════════════════════════════════════════════
+RESPONSE FORMAT (JSON)
+═══════════════════════════════════════════════════════════════
+{
+  "annotations": [
+    {
+      "id": "unique-id-string",
+      "label": "Short label (max 25 chars)",
+      "description": "Detailed explanation of what this represents",
+      "type": "entry|target|support|resistance|bos|choch|liquidity|fvg|orderblock|sweep",
+      "x": 0-100 (percentage from left),
+      "y": 0-100 (percentage from top - REMEMBER: lower y = higher price),
+      "lineY": 0-100 (REQUIRED for horizontal levels),
+      "price": exact_price_from_chart,
+      "color": "#hexcolor"
+    }
+  ],
+  "summary": "Professional 2-3 sentence assessment of what the chart shows and its quality as a setup"
+}
+
+═══════════════════════════════════════════════════════════════
+CRITICAL REMINDERS
+═══════════════════════════════════════════════════════════════
+• READ THE PRICE AXIS on the right side of the chart for exact levels
+• Double-check y-coordinates: HIGH prices = LOW y-values
+• If you can't clearly see something, DON'T annotate it
+• No valid setup? Annotate structure only, explain why in summary
+• Your annotations must be ACTIONABLE for a professional trader`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are a chart annotation specialist. Your job is to identify key price action elements on a trading chart and provide their VISUAL POSITIONS for annotation overlays.
-
-You must analyze the chart image and identify where specific trading concepts appear VISUALLY on the chart. Return positions as percentages (0-100) of the image dimensions:
-- x: 0 = left edge, 100 = right edge
-- y: 0 = top edge, 100 = bottom edge
-
-For each annotation, provide:
-1. A short label (max 25 chars) that will appear on the chart
-2. A description explaining what it represents
-3. The visual position (x, y) as percentages where the label should appear
-4. For horizontal levels, also provide lineY (the y% where the line should be drawn)
-5. The price level if identifiable
-6. The type and color
-
-ANNOTATION TYPES AND COLORS:
-- entry: Green (#22c55e) - Entry zones
-- target: Emerald (#10b981) - Take profit targets
-- support: Green (#22c55e) - Support levels
-- resistance: Red (#ef4444) - Resistance levels
-- bos: Blue (#3b82f6) - Break of structure
-- choch: Purple (#a855f7) - Change of character
-- liquidity: Orange (#f97316) - Liquidity pools (equal highs/lows)
-- fvg: Yellow (#eab308) - Fair value gaps / imbalances
-- orderblock: Blue (#3b82f6) - Order blocks / origin zones
-- sweep: Cyan (#06b6d4) - Liquidity sweeps
-
-IMPORTANT POSITIONING RULES:
-1. Place labels NEAR but NOT OVERLAPPING the feature they describe
-2. Use the RIGHT side of the chart for most labels (x: 65-95)
-3. For horizontal levels, the label should be at the same y-position as the level
-4. Avoid clustering - spread annotations vertically
-5. Entry zones should be prominently labeled
-6. Target levels should be above (for longs) or below (for shorts) entry
-
-Return JSON:
-{
-  "annotations": [
-    {
-      "id": "unique-id",
-      "label": "Short label",
-      "description": "What this represents",
-      "type": "entry|target|support|resistance|bos|choch|liquidity|fvg|orderblock|sweep",
-      "x": 0-100,
-      "y": 0-100,
-      "lineY": 0-100 (optional, for horizontal lines),
-      "price": number (optional),
-      "color": "#hexcolor"
-    }
-  ],
-  "summary": "Brief summary of the chart setup"
-}`
+          content: systemPrompt
         },
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: `Analyze this ${symbol} ${timeframe} chart and provide visual annotations for key price action elements.
-${analysisContext}
-Identify and annotate:
-1. Key support/resistance levels with their prices
-2. Entry zone (if valid setup exists)
-3. Target levels (TP1, TP2, etc.)
-4. Any BOS (break of structure) or CHOCH (change of character)
-5. Liquidity pools (equal highs/lows)
-6. Order blocks or origin zones
-7. FVG/imbalance zones
-8. Liquidity sweeps
+              text: `ANALYZE THIS ${symbol} ${timeframe} CHART WITH SURGICAL PRECISION.
 
-Place annotations at their VISUAL positions on this specific chart image. Be precise about where elements appear.`
+Your annotations will be displayed directly on this chart for trading decisions.
+
+${analysisContext}
+
+INSTRUCTIONS:
+1. First, carefully READ THE PRICE AXIS on the right side to understand price levels
+2. Identify ALL visible market structure (BOS, CHOCH, swing points)
+3. Mark ALL clear support and resistance levels with exact prices
+4. Identify any liquidity pools (equal highs/lows) and note if swept
+5. Mark any visible order blocks (consolidation before impulse moves)
+6. Mark any unfilled fair value gaps
+7. ONLY if a valid setup exists, mark entry, invalidation, and targets
+
+CRITICAL QUALITY CHECKS BEFORE RESPONDING:
+□ Did I read the price axis correctly?
+□ Are my y-coordinates correct? (lower y = higher price)
+□ Do I have lineY for all horizontal levels?
+□ Are prices accurate to what's visible on chart?
+□ If no valid setup, did I avoid annotating entry/targets?
+
+Provide PROFESSIONAL-GRADE annotations. This is life or death for capital.`
             },
             {
               type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageBase64}` }
+              image_url: {
+                url: `data:image/png;base64,${imageBase64}`,
+                detail: "high"  // Request high detail for better price reading
+              }
             }
           ]
         }
       ],
       response_format: { type: "json_object" },
-      max_tokens: 2000
+      max_tokens: 3000  // Increased for more detailed annotations
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");

@@ -6,7 +6,7 @@ import {
   DialogContent,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Sparkles, Maximize2, X } from "lucide-react";
+import { Loader2, Sparkles, Maximize2, X, RefreshCw } from "lucide-react";
 import type { ChartAnnotation } from "@/hooks/use-chart-snapshots";
 
 // Hide the default dialog close button in fullscreen mode
@@ -17,6 +17,7 @@ interface VisualAnnotationsProps {
   annotations: ChartAnnotation[];
   isLoading?: boolean;
   onGenerateAnnotations?: () => void;
+  onRegenerateAnnotations?: () => void;
   className?: string;
 }
 
@@ -25,6 +26,7 @@ export function VisualAnnotations({
   annotations,
   isLoading = false,
   onGenerateAnnotations,
+  onRegenerateAnnotations,
   className,
 }: VisualAnnotationsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -98,21 +100,40 @@ export function VisualAnnotations({
 
   return (
     <div className={cn("space-y-3", className)}>
-      {/* Generate Annotations Button */}
+      {/* Generate/Regenerate Annotations Button */}
       {onGenerateAnnotations && (
-        <Button
-          onClick={onGenerateAnnotations}
-          disabled={isLoading}
-          size="sm"
-          className="w-full"
-        >
-          {isLoading ? (
-            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+        <div className="flex gap-2">
+          {annotations.length === 0 ? (
+            <Button
+              onClick={onGenerateAnnotations}
+              disabled={isLoading}
+              size="sm"
+              className="w-full"
+            >
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4 mr-2" />
+              )}
+              {isLoading ? "Generating Breakdown..." : "Generate Visual Breakdown"}
+            </Button>
           ) : (
-            <Sparkles className="w-4 h-4 mr-2" />
+            <Button
+              onClick={onRegenerateAnnotations || onGenerateAnnotations}
+              disabled={isLoading}
+              size="sm"
+              variant="outline"
+              className="w-full"
+            >
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              {isLoading ? "Regenerating..." : "Regenerate Breakdown"}
+            </Button>
           )}
-          {isLoading ? "Generating Breakdown..." : "Generate Visual Breakdown"}
-        </Button>
+        </div>
       )}
 
       {/* Chart with Annotations */}
