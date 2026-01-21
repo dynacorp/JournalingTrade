@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,6 +8,9 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Sparkles, Maximize2, X } from "lucide-react";
 import type { ChartAnnotation } from "@/hooks/use-chart-snapshots";
+
+// Hide the default dialog close button in fullscreen mode
+import "./visual-annotations.css";
 
 interface VisualAnnotationsProps {
   imageData: string;
@@ -30,6 +33,14 @@ export function VisualAnnotations({
   const [fullscreenDimensions, setFullscreenDimensions] = useState({ width: 0, height: 0 });
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Recalculate fullscreen dimensions when image loads
+  const handleFullscreenImageLoad = useCallback(() => {
+    const container = fullscreenContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setFullscreenDimensions({ width: rect.width, height: rect.height });
+  }, []);
+
   // Update dimensions when container resizes
   useEffect(() => {
     const container = containerRef.current;
@@ -49,23 +60,34 @@ export function VisualAnnotations({
 
   // Update fullscreen dimensions when dialog opens
   useEffect(() => {
-    if (!isFullscreen) return;
+    if (!isFullscreen) {
+      // Reset dimensions when closing
+      setFullscreenDimensions({ width: 0, height: 0 });
+      return;
+    }
 
     const container = fullscreenContainerRef.current;
     if (!container) return;
 
     const updateFullscreenDimensions = () => {
       const rect = container.getBoundingClientRect();
-      setFullscreenDimensions({ width: rect.width, height: rect.height });
+      if (rect.width > 0 && rect.height > 0) {
+        setFullscreenDimensions({ width: rect.width, height: rect.height });
+      }
     };
 
-    // Small delay to let dialog render
-    const timeout = setTimeout(updateFullscreenDimensions, 50);
+    // Multiple delayed attempts to catch when dialog and image are ready
+    const timeout1 = setTimeout(updateFullscreenDimensions, 50);
+    const timeout2 = setTimeout(updateFullscreenDimensions, 150);
+    const timeout3 = setTimeout(updateFullscreenDimensions, 300);
+
     const observer = new ResizeObserver(updateFullscreenDimensions);
     observer.observe(container);
 
     return () => {
-      clearTimeout(timeout);
+      clearTimeout(timeout1);
+      clearTimeout(timeout2);
+      clearTimeout(timeout3);
       observer.disconnect();
     };
   }, [isFullscreen]);
@@ -189,7 +211,7 @@ export function VisualAnnotations({
 
       {/* Fullscreen Dialog */}
       <Dialog open={isFullscreen} onOpenChange={setIsFullscreen}>
-        <DialogContent className="max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 bg-black border-border overflow-hidden">
+        <DialogContent className="fullscreen-chart-dialog max-w-[95vw] max-h-[95vh] w-auto h-auto p-0 bg-black border-border overflow-hidden">
           <DialogTitle className="sr-only">Chart Breakdown Fullscreen View</DialogTitle>
           <div className="relative">
             {/* Close button */}
@@ -211,6 +233,7 @@ export function VisualAnnotations({
                 src={`data:image/png;base64,${imageData}`}
                 alt="Chart snapshot fullscreen"
                 className="max-w-[95vw] max-h-[90vh] w-auto h-auto block"
+                onLoad={handleFullscreenImageLoad}
               />
 
               {/* SVG Overlay for annotations in fullscreen */}

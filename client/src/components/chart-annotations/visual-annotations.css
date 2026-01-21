@@ -1,0 +1,4 @@
+/* Hide the default dialog close button for fullscreen chart view */
+.fullscreen-chart-dialog [data-radix-dialog-close] {
+  display: none;
+}
