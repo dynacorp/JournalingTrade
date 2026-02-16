@@ -22,8 +22,9 @@ input int    MAX_QUEUE_LINES     = 5000;
 input bool   ENABLE_LOGS   = true;
 input bool   SHOW_STATUS   = true;
 
-input int  SYNC_DAYS_BACK = 30;      // how far back to backfill
-input int  SYNC_MAX_DEALS = 2000;    // safety cap
+input int      SYNC_DAYS_BACK = 30;      // how far back to backfill (if no date set)
+input datetime SYNC_FROM_DATE = 0;      // Sync from specific date (overrides days back)
+input int      SYNC_MAX_DEALS = 2000;   // safety cap
 
 
 bool g_sync_in_progress = false;
@@ -226,7 +227,9 @@ bool PostJson(const string url,
 void SyncHistory()
 {
   datetime to_time = TimeCurrent();
-  datetime from_time = to_time - (datetime)(SYNC_DAYS_BACK * 86400);
+  datetime from_time = (SYNC_FROM_DATE > 0)
+                       ? SYNC_FROM_DATE
+                       : to_time - (datetime)(SYNC_DAYS_BACK * 86400);
 
   g_last_status = "Syncing history...";
   UpdateStatus();
@@ -295,6 +298,7 @@ void SyncHistory()
     if(ok)
     {
       sent++;
+      if(sent == 1) Log("SyncHistory: first trade sent OK. http=" + IntegerToString(code));
     }
     else if(code == 409)
     {
@@ -651,7 +655,14 @@ bool FillEntryFromHistory(const ulong position_id,
   HistorySelect(from_time, to_time);
 
   int total = HistoryDealsTotal();
-  if(total <= 0) return false;
+  if(total <= 0)
+  {
+    Log("FillEntry: no deals in history. position_id=" + (string)position_id);
+    return false;
+  }
+
+  Log("FillEntry: searching " + IntegerToString(total) +
+      " deals for position_id=" + (string)position_id);
 
   // Find earliest entry deal for this position
   bool found = false;
@@ -679,7 +690,13 @@ bool FillEntryFromHistory(const ulong position_id,
     }
   }
 
-  if(!found || best_deal == 0) return false;
+  if(!found || best_deal == 0)
+  {
+    Log("FillEntry: NO entry deal found for position_id=" + (string)position_id +
+        " (Deriv synthetics may not link deals via DEAL_POSITION_ID)");
+    return false;
+  }
+
   if(!HistoryDealSelect(best_deal)) return false;
 
   open_time   = (datetime)HistoryDealGetInteger(best_deal, DEAL_TIME);
@@ -689,10 +706,10 @@ bool FillEntryFromHistory(const ulong position_id,
   long dtype = HistoryDealGetInteger(best_deal, DEAL_TYPE);
   side = (dtype == DEAL_TYPE_SELL) ? "SELL" : "BUY";
 
-  // SL/TP: deals don't reliably store SL/TP. Keep previous values if already set.
-  // If you want accurate SL/TP historically, you'd need order history or store them on entry in real-time.
-  // So we only keep what we already have.
-  // sl_price and tp_price passed by ref so caller can keep existing.
+  Log("FillEntry: found entry deal=" + (string)best_deal +
+      " price=" + DoubleToString(entry_price, 3) +
+      " vol=" + DoubleToString(volume, 2) +
+      " side=" + side);
 
   return true;
 }
@@ -769,7 +786,80 @@ string BuildPayloadFromDeal(ulong deal_id, ulong position_identifier)
     }
   }
 
-  // 3) Absolute safety: never send empty open_time (prevents validation failures)
+  // 3) Fallback: extract directly from the close deal itself.
+  //    On Deriv synthetics, DEAL_POSITION_ID may not link entry<->exit,
+  //    so FillEntryFromHistory fails.  The close deal still carries volume
+  //    and we can compute entry_price from PnL.
+  //    Re-select the close deal since FillEntryFromHistory changed HistorySelect range.
+  HistoryDealSelect(deal_id);
+
+  if(volume == 0.0)
+  {
+    volume = HistoryDealGetDouble(deal_id, DEAL_VOLUME);
+    Log("Fallback: volume from close deal = " + DoubleToString(volume, 2));
+  }
+
+  // Determine side from close deal type (closing a BUY = SELL deal, and vice versa)
+  if(idx < 0)  // only override if tracker wasn't available
+  {
+    long close_deal_type = HistoryDealGetInteger(deal_id, DEAL_TYPE);
+    if(close_deal_type == DEAL_TYPE_SELL)
+      side = "BUY";   // closing sell = original was BUY
+    else if(close_deal_type == DEAL_TYPE_BUY)
+      side = "SELL";  // closing buy = original was SELL
+  }
+
+  // Compute entry_price from PnL when history lookup failed
+  if(entry_price == 0.0 && volume > 0.0 && close_price > 0.0)
+  {
+    double tick_value = 0, tick_size = 0;
+    SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE, tick_value);
+    SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE, tick_size);
+
+    if(tick_value > 0 && tick_size > 0)
+    {
+      double value_per_price_unit = (tick_value / tick_size) * volume;
+      if(value_per_price_unit > 0)
+      {
+        // BUY: pnl = (close - entry) * value  =>  entry = close - pnl/value
+        // SELL: pnl = (entry - close) * value  =>  entry = close + pnl/value
+        if(side == "BUY")
+          entry_price = close_price - (pnl / value_per_price_unit);
+        else
+          entry_price = close_price + (pnl / value_per_price_unit);
+
+        entry_price = NormalizeDouble(entry_price, digits);
+        Log("Fallback: entry_price computed from PnL = " + DoubleToString(entry_price, digits));
+      }
+    }
+  }
+
+  // Try to recover open_time from the opening order in history
+  if(open_time == 0 && position_identifier > 0)
+  {
+    // Re-select full history so HistoryOrdersTotal/GetTicket work
+    datetime _to = TimeCurrent();
+    datetime _from = _to - (datetime)(SYNC_DAYS_BACK * 86400);
+    HistorySelect(_from, _to);
+
+    int ord_total = HistoryOrdersTotal();
+    for(int oi = 0; oi < ord_total; oi++)
+    {
+      ulong ord = HistoryOrderGetTicket(oi);
+      if(ord == 0) continue;
+      ulong ord_pos = (ulong)HistoryOrderGetInteger(ord, ORDER_POSITION_ID);
+      if(ord_pos != position_identifier) continue;
+
+      datetime ord_time = (datetime)HistoryOrderGetInteger(ord, ORDER_TIME_DONE);
+      if(ord_time > 0 && (open_time == 0 || ord_time < open_time))
+      {
+        open_time = ord_time;
+        Log("Fallback: open_time from order history = " + TimeToString(open_time));
+      }
+    }
+  }
+
+  // 4) Absolute safety: never send empty open_time (prevents validation failures)
   if(open_time == 0) open_time = close_time;
 
   // Cash calculations
